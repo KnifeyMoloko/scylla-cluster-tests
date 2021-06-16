@@ -90,13 +90,18 @@ class ArtifactsTest(ClusterTester):
         the backend used.
         """
         describecluster_snitch = self.get_describecluster_info().snitch
-        with self.node.remote_manager_yaml(SCYLLA_YAML_PATH) as scylla_yaml:
+        with self.node.remote_scylla_yaml(SCYLLA_YAML_PATH) as scylla_yaml:
             scylla_yaml_snitch = scylla_yaml['endpoint_snitch']
         expected_snitches = BACKENDS[backend_name]
 
         snitch_patterns = [re.compile(f"({snitch})") for snitch in expected_snitches]
         snitch_matches_describecluster = [pattern.search(describecluster_snitch) for pattern in snitch_patterns]
         snitch_matches_scylla_yaml = [pattern.search(scylla_yaml_snitch) for pattern in snitch_patterns]
+
+        self.log.info(f"Is this a nonroot install run: {self.params.get('nonroot_offline_install')}")
+        self.log.info(f"Snitch according to scylla.yaml: {scylla_yaml}")
+        self.log.info(f"Expected snitch according to BACKENDS: {expected_snitches}")
+
 
         with self.subTest('verify snitch against describecluster output'):
             self.assertTrue(any(snitch_matches_describecluster),

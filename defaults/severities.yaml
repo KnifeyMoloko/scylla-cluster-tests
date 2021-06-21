@@ -43,6 +43,8 @@ NdbenchStressEvent.failure: CRITICAL
 NdbenchStressEvent.error: ERROR
 NdbenchStressEvent.start: NORMAL
 NdbenchStressEvent.finish: NORMAL
+NdBenchLogEvent.BuildFailed: CRITICAL
+NdBenchLogEvent.RegularEvent: NORMAL
 CDCReaderStressEvent.failure: CRITICAL
 CDCReaderStressEvent.error: ERROR
 CDCReaderStressEvent.start: NORMAL

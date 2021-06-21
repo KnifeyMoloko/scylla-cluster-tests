@@ -104,7 +104,25 @@ class NdbenchStressEvent(StressEvent, abstract=True):
     finish: Type[StressEventProtocol]
 
 
-NdbenchStressEvent.add_stress_subevents(failure=Severity.CRITICAL, error=Severity.ERROR)
+NdbenchStressEvent.add_stress_subevents(start=Severity.NORMAL, finish=Severity.NORMAL, error=Severity.ERROR,
+                                        failure=Severity.CRITICAL)
+
+
+class NdBenchLogEvent(LogEvent, abstract=True):
+    BuildFailed: Type[LogEventProtocol]
+    RegularEvent: Type[LogEventProtocol]
+
+
+NdBenchLogEvent.add_subevent_type("BuildFailed", severity=Severity.CRITICAL, regex=r"BUILD FAILED in")
+NdBenchLogEvent.add_subevent_type("RegularEvent", severity=Severity.NORMAL, regex=r".*")
+
+
+NDBENCH_ERROR_EVENTS = (
+    NdBenchLogEvent.BuildFailed(),
+    NdBenchLogEvent.RegularEvent()
+)
+
+NDBENCH_ERROR_EVENTS_PATTERNS = [(re.compile(event.regex), event) for event in NDBENCH_ERROR_EVENTS]
 
 
 class KclStressEvent(StressEvent, abstract=True):

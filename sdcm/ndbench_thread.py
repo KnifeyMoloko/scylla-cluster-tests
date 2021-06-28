@@ -153,8 +153,7 @@ class NdBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-many-
             node_cmd = self.stress_cmd
 
         docker = RemoteDocker(loader, image_name='molokoknifey/repos:ndbench-jdk8-20210625',
-                              ports=[8080],
-                              extra_docker_opts=f'--network=host')
+                              extra_docker_opts=f'--network=host --label {self.shell_marker}')
 
         node_cmd = f'STRESS_TEST_MARKER={self.shell_marker}; {node_cmd}'
 
@@ -167,9 +166,7 @@ class NdBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-many-
                                   timeout=self.timeout + self.shutdown_timeout,
                                   ignore_status=True,
                                   log_file=log_file_name,
-                                  verbose=True,
-                                  watchers=[FailuresWatcher(r'.*', callback=raise_event_callback,
-                                                            raise_exception=False)])
+                                  verbose=True)
             except Exception as exc:
 
                 NdbenchStressEvent.failure(node=str(loader),

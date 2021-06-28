@@ -1,5 +1,6 @@
 import logging
 import os
+import tarfile
 import zipfile
 import tempfile
 import json
@@ -172,16 +173,24 @@ def create_monitoring_stack_dir(base_dir, archive):
 
 def extract_monitoring_stack_archive(downloaded_monitor_set_archive, monitoring_stack_base_dir):
 
-    return extract_file_from_zip_archive('monitoring_data_stack',
-                                         downloaded_monitor_set_archive,
-                                         monitoring_stack_base_dir)
+    return extract_file_from_archive('monitoring_data_stack',
+                                     downloaded_monitor_set_archive,
+                                     monitoring_stack_base_dir)
 
 
 def extract_monitoring_data_archive(downloaded_monitor_set_archive, monitoring_stack_base_dir):
 
-    return extract_file_from_zip_archive('prometheus_data',
-                                         downloaded_monitor_set_archive,
-                                         monitoring_stack_base_dir)
+    return extract_file_from_archive('prometheus_data',
+                                     downloaded_monitor_set_archive,
+                                     monitoring_stack_base_dir)
+
+
+def extract_file_from_archive(pattern, archive, extract_dir):
+    if archive.endswith('.zip'):
+        return extract_file_from_zip_archive(pattern, archive, extract_dir)
+    if archive.endswith('.tar.gz'):
+        return extract_file_from_tar_archive(pattern, archive, extract_dir)
+    raise ValueError(f"Not supported archive type{archive.split('.')[-1]}")
 
 
 def extract_file_from_zip_archive(pattern, archive, extract_dir):
@@ -189,8 +198,32 @@ def extract_file_from_zip_archive(pattern, archive, extract_dir):
     with zipfile.ZipFile(archive) as zfile:
         for name in zfile.namelist():
             if pattern in name:
+                target_dir = os.path.join(extract_dir, name)
+                if is_path_outside_of_dir(target_dir, extract_dir):
+                    LOGGER.warning('Skipping %s file it leads to outside of the target dir', name)
+                    continue
                 zfile.extract(name, extract_dir)
-                found_file = os.path.join(extract_dir, name)
+                found_file = target_dir
+                break
+    return found_file
+
+
+def is_path_outside_of_dir(path, base) -> bool:
+    real_base = os.path.realpath(base)
+    return os.path.commonpath((os.path.realpath(path), real_base)) != real_base
+
+
+def extract_file_from_tar_archive(pattern, archive, extract_dir):
+    found_file = None
+    with tarfile.open(archive) as tar_file:
+        for name in tar_file.getnames():
+            if pattern in name:
+                target_dir = os.path.join(extract_dir, name)
+                if is_path_outside_of_dir(target_dir, extract_dir):
+                    LOGGER.warning('Skipping %s file it leads to outside of the target dir', name)
+                    continue
+                tar_file.extract(name, extract_dir)
+                found_file = target_dir
                 break
     return found_file
 
@@ -356,6 +389,7 @@ def verify_dockers_are_running():
 
 
 def verify_grafana_is_available(version):  # pylint: disable=no-member
+    # pylint: disable=import-outside-toplevel
     from sdcm.logcollector import GrafanaEntity
     grafana_statuses = []
     for dashboard in GrafanaEntity.base_grafana_dashboards:
@@ -382,6 +416,7 @@ def verify_prometheus_is_available():
     :rtype: {bool}
     """
 
+    # pylint: disable=import-outside-toplevel
     from sdcm.db_stats import PrometheusDBStats
 
     time_end = time.time()

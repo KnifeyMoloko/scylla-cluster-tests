@@ -19,7 +19,7 @@ from invoke.runners import Result
 from sdcm.sct_events import Severity
 from sdcm.sct_events.base import LogEvent
 from sdcm.sct_events.loaders import \
-    GeminiStressEvent, CassandraStressEvent, ScyllaBenchEvent, YcsbStressEvent, NdbenchStressEvent, CDCReaderStressEvent, \
+    GeminiStressEvent, CassandraStressEvent, ScyllaBenchEvent, YcsbStressEvent, NdBenchStressEvent, CDCReaderStressEvent, \
     KclStressEvent, CassandraStressLogEvent, ScyllaBenchLogEvent, GeminiStressLogEvent, \
     CS_ERROR_EVENTS, SCYLLA_BENCH_ERROR_EVENTS, CS_ERROR_EVENTS_PATTERNS
 
@@ -290,14 +290,14 @@ class TestCDCReaderStressEvent(unittest.TestCase):
 
 class TestNdbenchStressEvent(unittest.TestCase):
     def test_subevents(self):
-        self.assertTrue(issubclass(NdbenchStressEvent.failure, NdbenchStressEvent))
-        self.assertTrue(issubclass(NdbenchStressEvent.error, NdbenchStressEvent))
-        self.assertFalse(hasattr(NdbenchStressEvent, "timeout"))
-        self.assertTrue(issubclass(NdbenchStressEvent.start, NdbenchStressEvent))
-        self.assertTrue(issubclass(NdbenchStressEvent.finish, NdbenchStressEvent))
+        self.assertTrue(issubclass(NdBenchStressEvent.failure, NdBenchStressEvent))
+        self.assertTrue(issubclass(NdBenchStressEvent.error, NdBenchStressEvent))
+        self.assertFalse(hasattr(NdBenchStressEvent, "timeout"))
+        self.assertTrue(issubclass(NdBenchStressEvent.start, NdBenchStressEvent))
+        self.assertTrue(issubclass(NdBenchStressEvent.finish, NdBenchStressEvent))
 
     def test_without_errors(self):
-        event = NdbenchStressEvent.error(node=[], stress_cmd="c-s", log_file_name="1.log")
+        event = NdBenchStressEvent.error(node=[], stress_cmd="c-s", log_file_name="1.log")
         self.assertEqual(event.severity, Severity.ERROR)
         self.assertEqual(event.node, "[]")
         self.assertEqual(event.stress_cmd, "c-s")
@@ -310,7 +310,7 @@ class TestNdbenchStressEvent(unittest.TestCase):
         self.assertEqual(event, pickle.loads(pickle.dumps(event)))
 
     def test_with_errors(self):
-        event = NdbenchStressEvent.failure(node="node1", errors=["e1", "e2"])
+        event = NdBenchStressEvent.failure(node="node1", errors=["e1", "e2"])
         self.assertEqual(event.severity, Severity.CRITICAL)
         self.assertEqual(event.node, "node1")
         self.assertIsNone(event.stress_cmd)

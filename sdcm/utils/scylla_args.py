@@ -9,12 +9,12 @@
 #
 # See LICENSE for more details.
 #
-# Copyright (c) 2020 ScyllaDB
+# Copyright (c) 2021 ScyllaDB
 
 import re
 import logging
 import argparse
-from typing import Text, NoReturn
+from typing import Text, NoReturn, Callable
 
 
 # Regexp for parsing arguments from the output of `scylla --help' command:
@@ -45,16 +45,24 @@ class ScyllaArgParser(argparse.ArgumentParser):
         raise ScyllaArgError(message)
 
     @classmethod
-    def from_scylla_help(cls, help: Text) -> "ScyllaArgParser":
+    def from_scylla_help(cls, help_text: Text, duplicate_cb: Callable = None) -> "ScyllaArgParser":
         parser = cls(prog="scylla")
-        for *args, val in SCYLLA_ARG.findall(help):
-            parser.add_argument(*filter(bool, args), action="store" if val else "store_false")
+        duplicates = set()
+        for *args, val in SCYLLA_ARG.findall(help_text):
+            try:
+                parser.add_argument(*filter(bool, args), action="store" if val else "store_false")
+            except argparse.ArgumentError:
+                if arg_names := list(filter(bool, args)):
+                    duplicates.add(arg_names[-1])
+        if duplicates and duplicate_cb:
+            duplicate_cb(duplicates)
+
         return parser
 
-    def filter_args(self, args: str) -> str:
+    def filter_args(self, args: str, unknown_args_cb: Callable = None) -> str:
         parsed_args, unknown_args = self.parse_known_args(args.split())
-        if unknown_args:
-            LOGGER.warning("Following arguments are filtered out: %s", unknown_args)
+        if unknown_args and unknown_args_cb:
+            unknown_args_cb(unknown_args)
         filtered_args = []
         for arg, val in vars(parsed_args).items():
             filtered_args.append(f"--{arg.replace('_', '-')}")

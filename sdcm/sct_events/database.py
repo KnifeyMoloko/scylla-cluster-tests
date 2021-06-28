@@ -55,6 +55,7 @@ class DatabaseLogEvent(LogEvent, abstract=True):
 MILLI_RE = re.compile(r"(\d+) ms")
 
 
+# pylint: disable=too-few-public-methods
 class ReactorStalledMixin(Generic[T_log_event]):
     tolerable_reactor_stall: int = TOLERABLE_REACTOR_STALL
 
@@ -153,6 +154,30 @@ SYSTEM_ERROR_EVENTS = (
 SYSTEM_ERROR_EVENTS_PATTERNS: List[Tuple[re.Pattern, LogEventProtocol]] = \
     [(re.compile(event.regex, re.IGNORECASE), event) for event in SYSTEM_ERROR_EVENTS]
 BACKTRACE_RE = re.compile(r'(?P<other_bt>/lib.*?\+0x[0-f]*\n)|(?P<scylla_bt>0x[0-f]*\n)', re.IGNORECASE)
+
+
+class ScyllaHelpErrorEvent(SctEvent, abstract=True):
+    duplicate: Type[SctEventProtocol]
+    filtered: Type[SctEventProtocol]
+    message: str
+
+    def __init__(self, message: Optional[str] = None, severity=Severity.ERROR):
+        super().__init__(severity=severity)
+
+        # Don't include `message' to the state if it's None.
+        if message is not None:
+            self.message = message
+
+    @property
+    def msgfmt(self):
+        fmt = super().msgfmt + ": type={0.type}"
+        if hasattr(self, "message"):
+            fmt += " message={0.message}"
+        return fmt
+
+
+ScyllaHelpErrorEvent.add_subevent_type("duplicate")
+ScyllaHelpErrorEvent.add_subevent_type("filtered")
 
 
 class FullScanEvent(SctEvent, abstract=True):

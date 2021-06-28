@@ -13,7 +13,7 @@ elasticsearch>=7.0.0,<8.0.0
 sortedcontainers==1.5.9
 jinja2==2.11.3
 prometheus_client==0.8.0
-pre-commit==1.14.4
+pre-commit==2.13.0
 anyconfig==0.9.8
 click==7.0
 click-completion==0.5.0
@@ -33,8 +33,7 @@ python-jenkins==1.4.0
 # fix segmentation fault with ssh2-python
 https://github.com/dkropachev/ssh2-python/archive/fix_segmentation.zip
 parameterized==0.7.4
-pylint==2.5.3  # Needed for pre-commit hooks
-astroid==2.4.2 # version 2.5 introduce issue with linting elasticsearch api
+pylint==2.8.3  # Needed for pre-commit hooks
 autopep8==1.5.3  # Needed for pre-commit hooks
 kubernetes==12.0.1
 ldap3==2.7

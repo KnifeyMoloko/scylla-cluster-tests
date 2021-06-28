@@ -1,22 +1,27 @@
-test_duration: 120
+test_duration: 30
 
-prepare_write_cmd:  >-
-  ndbench cli.clientName=CassJavaDriverGeneric ; numKeys=1048576 ; numValues=10 ; dataSize=4096 ; cass.colsPerRow=10;
-  readEnabled=false; numReaders=0; numWriters=4 ; cass.writeConsistencyLevel=QUORUM ; generateChecksum=true;  cli.timeoutMillis=1800000; writeRateLimit=30000
+prepare_write_cmd: >-
+  ndbench cli.clientName=CassJavaDriverGeneric ; numKeys=20971520 ; numValues=10 ; dataSize=512 ; cass.colsPerRow=10;
+  readEnabled=true; numReaders=1; numWriters=1 ; cass.writeConsistencyLevel=QUORUM ; generateChecksum=true;
+  cli.timeoutMillis=14400000; writeRateLimit=60000
 
 stress_cmd:
   - >-
-    ndbench cli.clientName=CassJavaDriverGeneric ; numKeys=1048576 ; numValues=10 ; dataSize=4096 ; cass.colsPerRow=10;
-    readEnabled=false; numReaders=0; numWriters=4 ; cass.writeConsistencyLevel=QUORUM ; generateChecksum=true; cli.timeoutMillis=14400000; writeRateLimit=30000
+    ndbench cli.clientName=CassJavaDriverGeneric ; numKeys=20971520 ; numValues=10 ; dataSize=512 ; cass.colsPerRow=10;
+    readEnabled=true; numReaders=1; numWriters=1 ; cass.writeConsistencyLevel=QUORUM ; generateChecksum=true;
+    cli.timeoutMillis=14400000; writeRateLimit=60000
 
-  - >-
-    ndbench cli.clientName=CassJavaDriverGeneric ; numKeys=1048576 ; numValues=10 ; dataSize=4096 ; cass.colsPerRow=10;
-    writeEnabled=false; numReaders=4; numWriters=0 ; cass.readConsistencyLevel=QUORUM ; validateChecksum=true; cli.timeoutMillis=14400000; readRateLimit=30000
+#  - >-
+#    ndbench cli.clientName=CassJavaDriverGeneric ; numKeys=20971520 ; numValues=10 ; dataSize=512 ; cass.colsPerRow=10;
+#    writeEnabled=false; numReaders=30; numWriters=0 ; cass.readConsistencyLevel=QUORUM ; validateChecksum=true;
+#    cli.timeoutMillis=14400000; readRateLimit=60000
 
-n_db_nodes: 3
-n_loaders: 1
+n_db_nodes: 12
+n_loaders: 2
 n_monitor_nodes: 1
-instance_type_db: 'i3.large'
+instance_type_db: 'i3.xlarge'
+instance_type_loader: 'c5.9xlarge' # 32 vCPU, 72 GB RAM, 10GiB
 
 user_prefix: 'longevity-ndbench-100gb-4h'
 space_node_threshold: 64424
+

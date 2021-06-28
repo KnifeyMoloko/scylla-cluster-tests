@@ -85,7 +85,7 @@ from sdcm.sct_events.health import ClusterHealthValidatorEvent
 from sdcm.sct_events.system import TestFrameworkEvent
 from sdcm.sct_events.filters import DbEventsFilter
 from sdcm.sct_events.grafana import set_grafana_url
-from sdcm.sct_events.database import SYSTEM_ERROR_EVENTS_PATTERNS, BACKTRACE_RE, DatabaseLogEvent
+from sdcm.sct_events.database import SYSTEM_ERROR_EVENTS_PATTERNS, BACKTRACE_RE, DatabaseLogEvent, ScyllaHelpErrorEvent
 from sdcm.sct_events.nodetool import NodetoolEvent
 from sdcm.sct_events.decorators import raise_event_on_failure
 from sdcm.utils.auto_ssh import AutoSshContainerMixin
@@ -129,7 +129,7 @@ def remove_if_exists(file_path):
 class NodeError(Exception):
 
     def __init__(self, msg=None):
-        super(NodeError, self).__init__()
+        super().__init__()
         self.msg = msg
 
     def __str__(self):
@@ -432,8 +432,8 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
             return ''
 
         try:
-            grep_result = self.remoter.run(f'grep "^CPUSET" /etc/scylla.d/cpuset.conf')
-        except Exception as exc:
+            grep_result = self.remoter.run('grep "^CPUSET" /etc/scylla.d/cpuset.conf')
+        except Exception as exc:  # pylint: disable=broad-except
             self.log.error(f"Failed to get CPUSET. Error: {exc}")
             return ''
 
@@ -465,7 +465,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
 
         try:
             grep_result = self.remoter.run(f'grep "^SCYLLA_ARGS=" {self.scylla_server_sysconfig_path}')
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-except
             self.log.error(f"Failed to get SCYLLA_ARGS. Error: {exc}")
             return ''
 
@@ -512,14 +512,15 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
                 node_seeds = conf_dict['seed_provider'][0]['parameters'][0].get('seeds')
             except Exception as details:
                 self.log.debug('Loaded YAML data structure: %s', conf_dict)
-                raise ValueError('Exception determining seed node ips: %s' % details)
+                raise ValueError('Exception determining seed node ips') from details
 
             if node_seeds:
                 return node_seeds.split(',')
             else:
                 raise Exception('Seeds not found in the scylla.yaml')
 
-    def is_kubernetes(self) -> bool:
+    @staticmethod
+    def is_kubernetes() -> bool:
         return False
 
     def is_centos7(self):
@@ -1289,7 +1290,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
                 if line[0] == '{':
                     try:
                         json_log = json.loads(line)
-                    except Exception:
+                    except Exception:  # pylint: disable=broad-except
                         pass
                 if not start_from_beginning and TestConfig.RSYSLOG_ADDRESS:
                     line = line.strip()
@@ -1756,9 +1757,18 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         if append_scylla_args:
             scylla_help = self.remoter.run(
                 f"{self.add_install_prefix('/usr/bin/scylla')} --help", ignore_status=True).stdout
-            scylla_arg_parser = ScyllaArgParser.from_scylla_help(scylla_help)
-            append_scylla_args = scylla_arg_parser.filter_args(append_scylla_args)
-
+            scylla_arg_parser = ScyllaArgParser.from_scylla_help(
+                scylla_help,
+                duplicate_cb=lambda dups: ScyllaHelpErrorEvent.duplicate(
+                    message=f"Scylla help contains duplicate for the following arguments: {','.join(dups)}"
+                ).publish()
+            )
+            append_scylla_args = scylla_arg_parser.filter_args(
+                append_scylla_args,
+                unknown_args_cb=lambda args: ScyllaHelpErrorEvent.filtered(
+                    message="Following arguments are filtered out: " + ','.join(args)
+                ).publish()
+            )
         if self.parent_cluster.params.get('db_nodes_shards_selection') == 'random':
             append_scylla_args += f" --smp {self.scylla_random_shards()}"
 
@@ -2076,7 +2086,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
                 # Reload the env variables by ssh reconnect
                 self.remoter.run('env', verbose=True, change_context=True)
                 assert 'XDG_RUNTIME_DIR' in self.remoter.run('env', verbose=True).stdout
-            install_cmds = dedent(f"""
+            install_cmds = dedent("""
                 tar xvfz ./unified_package.tar.gz
                 ./install.sh --nonroot
                 sudo rm -f /tmp/scylla.yaml
@@ -2084,7 +2094,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
             # Known issue: https://github.com/scylladb/scylla/issues/7071
             self.remoter.run('bash -cxe "%s"' % install_cmds)
         else:
-            install_cmds = dedent(f"""
+            install_cmds = dedent("""
                 tar xvfz ./unified_package.tar.gz
                 ./install.sh --housekeeping
                 rm -f /tmp/scylla.yaml
@@ -2102,14 +2112,18 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
             self.remoter.run(r'sudo apt-get install -y {0}-server-dbg={1}\*'
                              .format(self.scylla_pkg(), self.scylla_version), ignore_status=True)
 
-    def is_scylla_installed(self):
+    def is_scylla_installed(self, raise_if_not_installed=False):
         if self.distro.is_rhel_like:
             result = self.remoter.run(f'rpm -q {self.scylla_pkg()}', verbose=False, ignore_status=True)
         elif self.distro.is_ubuntu or self.distro.is_debian:
             result = self.remoter.run(f'dpkg-query --show {self.scylla_pkg()}', verbose=False, ignore_status=True)
         else:
             raise ValueError(f"Unsupported Linux distribution: {self.distro}")
-        return result.exit_status == 0
+        if result.exit_status == 0:
+            return True
+        elif raise_if_not_installed:
+            raise Exception(f"There is no pre-installed ScyllaDB on {self}")
+        return False
 
     def get_scylla_version(self) -> str:
         self.scylla_version = self.scylla_version_detailed = ""
@@ -2562,9 +2576,8 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
                 raise Exception('Resharding was not finished! '
                                 f'(murmur3_partitioner_ignore_msb_bits={murmur3_partitioner_ignore_msb_bits}) '
                                 'Check the log for the details')
-            else:
-                self.log.debug('Resharding has been finished successfully '
-                               f'(murmur3_partitioner_ignore_msb_bits={murmur3_partitioner_ignore_msb_bits})')
+            self.log.debug('Resharding has been finished successfully '
+                           f'(murmur3_partitioner_ignore_msb_bits={murmur3_partitioner_ignore_msb_bits})')
 
     def _gen_nodetool_cmd(self, sub_cmd, args, options):
         credentials = self.parent_cluster.get_db_auth()
@@ -2684,7 +2697,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
                 for node_ip, node_properties in dc_status.items():
                     nodes_status[node_ip] = {'status': node_properties['state'], 'dc': dc}
 
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-except
             ClusterHealthValidatorEvent.NodeStatus(
                 severity=Severity.WARNING,
                 node=self.name,
@@ -2776,7 +2789,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
                 cqlsh_out = self.remoter.run(cmd, timeout=timeout + 30,  # we give 30 seconds to cqlsh timeout mechanism to work
                                              verbose=verbose)
                 break
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 num_retry_on_failure -= 1
                 if not num_retry_on_failure:
                     raise
@@ -2888,22 +2901,22 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         self.log.info("Waiting for Scylla Machine Image setup to finish...")
         wait.wait_for(self.is_machine_image_configured, step=10, timeout=300)
 
-    def get_sysctl_output(self) -> Dict[str, str]:
-        properties = {}
+    def get_sysctl_properties(self) -> Dict[str, str]:
+        sysctl_properties = {}
         result = self.remoter.sudo("sysctl -a", ignore_status=True)
 
         if not result.ok:
             self.log.error(f"sysctl command failed: {result}")
-            return properties
+            return sysctl_properties
 
         for line in result.stdout.strip().split("\n"):
             try:
                 name, value = line.strip().split("=", 1)
-                properties.update({name.strip(): value.strip()})
+                sysctl_properties.update({name.strip(): value.strip()})
             except ValueError:
                 self.log.error(f"Could not parse sysctl line: {line}")
 
-        return properties
+        return sysctl_properties
 
     def set_seed_flag(self, is_seed):
         self.is_seed = is_seed
@@ -2929,6 +2942,11 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
             self.remoter.sudo('apt-get remove -y unattended-upgrades', ignore_status=True)
             self.remoter.sudo('apt-get remove -y update-manager', ignore_status=True)
 
+    def get_nic_devices(self) -> List:
+        """Returns list of ethernet network interfaces"""
+        result = self.remoter.run('/sbin/ip -o link show |grep ether |awk -F": " \'{print $2}\'', verbose=True)
+        return result.stdout.strip().split()
+
 
 class FlakyRetryPolicy(RetryPolicy):
 
@@ -2942,18 +2960,22 @@ class FlakyRetryPolicy(RetryPolicy):
             return self.RETRY, None
         return self.RETHROW, None
 
+    # pylint: disable=too-many-arguments
     def on_read_timeout(self, query, consistency, required_responses,
                         received_responses, data_retrieved, retry_num):
         return self._retry_message(msg="Retrying read after timeout", retry_num=retry_num)
 
+    # pylint: disable=too-many-arguments
     def on_write_timeout(self, query, consistency, write_type,
                          required_responses, received_responses, retry_num):
         return self._retry_message(msg="Retrying write after timeout", retry_num=retry_num)
 
+    # pylint: disable=too-many-arguments
     def on_unavailable(self, query, consistency, required_replicas, alive_replicas, retry_num):
         return self._retry_message(msg="Retrying request after UE", retry_num=retry_num)
 
 
+# pylint: disable=too-many-instance-attributes
 @dataclass
 class DeadNode:
     name: str
@@ -3022,7 +3044,7 @@ class BaseCluster:  # pylint: disable=too-many-instance-attributes,too-many-publ
             raise ValueError('Unsupported type: {}'.format(type(n_nodes)))
         self.coredumps = dict()
         self.latency_results = dict()
-        super(BaseCluster, self).__init__()
+        super().__init__()
 
     @property
     def auto_bootstrap(self):
@@ -3249,7 +3271,8 @@ class BaseCluster:  # pylint: disable=too-many-instance-attributes,too-many-publ
                                     connect_timeout=connect_timeout, verbose=verbose)
 
     @retrying(n=8, sleep_time=15, allowed_exceptions=(NoHostAvailable,))
-    def cql_connection_patient(self, node, keyspace=None,  # pylint: disable=too-many-arguments
+    def cql_connection_patient(self, node, keyspace=None,
+                               # pylint: disable=too-many-arguments,unused-argument
                                user=None, password=None,
                                compression=True, protocol_version=None,
                                port=None, ssl_opts=None, connect_timeout=100, verbose=True):
@@ -3374,7 +3397,7 @@ class BaseCluster:  # pylint: disable=too-many-instance-attributes,too-many-publ
 
 class NodeSetupFailed(Exception):
     def __init__(self, node, error_msg, traceback_str=""):
-        super(NodeSetupFailed, self).__init__(error_msg)
+        super().__init__(error_msg)
         self.node = node
         self.error_msg = error_msg
         self.traceback_str = "\n" + traceback_str if traceback_str else ""
@@ -3487,7 +3510,7 @@ class BaseScyllaCluster:  # pylint: disable=too-many-public-methods, too-many-in
         self.nemesis_threads = []
         self.nemesis_count = 0
         self._node_cycle = None
-        super(BaseScyllaCluster, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     @staticmethod
     def get_node_ips_param(public_ip=True):
@@ -3505,7 +3528,7 @@ class BaseScyllaCluster:  # pylint: disable=too-many-public-methods, too-many-in
 
     @property
     def racks(self) -> Set[int]:
-        return set([node.rack for node in self.nodes])
+        return {node.rack for node in self.nodes}
 
     def set_seeds(self, wait_for_timeout=300, first_only=False):
         seeds_selector = self.params.get('seeds_selector')
@@ -4018,6 +4041,39 @@ class BaseScyllaCluster:  # pylint: disable=too-many-public-methods, too-many-in
                           ldap=self.params.get('use_ldap_authorization'),
                           ms_ad_ldap=self.params.get('use_ms_ad_ldap'))
 
+    def scylla_configure_non_root_installation(self, node, devname, verbose, timeout):
+        node.stop_scylla_server(verify_down=False)
+        node.remoter.run(f'{INSTALL_DIR}/sbin/scylla_setup --nic {devname} --no-raid-setup --no-io-setup',
+                         verbose=True, ignore_status=True)
+        node.remoter.send_files(src='./configurations/io.conf', dst=f'{INSTALL_DIR}/etc/scylla.d/')
+        node.remoter.send_files(src='./configurations/io_properties.yaml', dst=f'{INSTALL_DIR}/etc/scylla.d/')
+        node.remoter.run(
+            fr"sed -ie 's/io-properties-file=/io-properties-file=\/home\/{TEST_USER}\/scylladb/g' {INSTALL_DIR}/etc/scylla.d/io.conf")
+        node.remoter.run(
+            fr"sed -ie 's/mountpoint: .*/mountpoint: \/home\/{TEST_USER}\/scylladb/g' {INSTALL_DIR}/etc/scylla.d/io_properties.yaml")
+
+        # simple config
+        node.remoter.run(
+            f"echo 'cluster_name: \"{self.name}\"' >> {INSTALL_DIR}/etc/scylla/scylla.yaml")  # pylint: disable=no-member
+        node.remoter.run(
+            f"sed -ie 's/- seeds: .*/- seeds: {node.ip_address}/g' {INSTALL_DIR}/etc/scylla/scylla.yaml")
+        node.remoter.run(
+            f"sed -ie 's/^listen_address: .*/listen_address: {node.ip_address}/g' {INSTALL_DIR}/etc/scylla/scylla.yaml")
+        node.remoter.run(
+            f"sed -ie 's/^rpc_address: .*/rpc_address: {node.ip_address}/g' {INSTALL_DIR}/etc/scylla/scylla.yaml")
+
+        node.start_scylla_server(verify_up=False, verify_up_timeout=timeout)
+        node.wait_db_up(verbose=verbose, timeout=timeout)
+        node.wait_jmx_up(verbose=verbose, timeout=200)
+
+    def copy_preconfigured_iotune_files(self, node):
+        self.log.info("This AMI need to be tweaked for io.conf and properties")
+        for conf in ['io.conf', 'io_properties.yaml']:
+            node.remoter.send_files(src=os.path.join('./configurations/', conf),
+                                    # pylint: disable=not-callable
+                                    dst='/tmp/')
+            node.remoter.run('sudo mv /tmp/{0} /etc/scylla.d/{0}'.format(conf))
+
     def node_setup(self, node: BaseNode, verbose: bool = False, timeout: int = 3600):  # pylint: disable=too-many-branches
         node.wait_ssh_up(verbose=verbose, timeout=timeout)
         if node.distro.is_centos8 or node.distro.is_rhel8 or node.distro.is_oel8:
@@ -4029,55 +4085,23 @@ class BaseScyllaCluster:  # pylint: disable=too-many-public-methods, too-many-in
 
         install_scylla = True
 
-        if self.params.get("use_preinstalled_scylla"):
-            if node.is_scylla_installed():
-                install_scylla = False
-            else:
-                raise Exception("There is no pre-installed ScyllaDB")
+        if self.params.get("use_preinstalled_scylla") and node.is_scylla_installed(raise_if_not_installed=True):
+            install_scylla = False
 
         if not TestConfig.REUSE_CLUSTER:
             node.disable_daily_triggered_services()
-
-            result = node.remoter.run('/sbin/ip -o link show |grep ether |awk -F": " \'{print $2}\'', verbose=True)
-            devname = result.stdout.strip()
+            nic_devname = node.get_nic_devices()[0]
             if install_scylla:
                 self._scylla_install(node)
             else:
                 self.log.info("Waiting for preinstalled Scylla")
                 self._wait_for_preinstalled_scylla(node)
                 self.log.info("Done waiting for preinstalled Scylla")
-
                 if self.params.get('workaround_kernel_bug_for_iotune'):
-                    self.log.info("This AMI need to be tweaked for io.conf and properties")
-                    for conf in ['io.conf', 'io_properties.yaml']:
-                        node.remoter.send_files(src=os.path.join('./configurations/', conf),
-                                                # pylint: disable=not-callable
-                                                dst='/tmp/')
-                        node.remoter.run('sudo mv /tmp/{0} /etc/scylla.d/{0}'.format(conf))
+                    self.copy_preconfigured_iotune_files(node)
             if node.is_nonroot_install:
-                node.stop_scylla_server(verify_down=False)
-                node.remoter.run(f'{INSTALL_DIR}/sbin/scylla_setup --nic {devname} --no-raid-setup --no-io-setup',
-                                 verbose=True, ignore_status=True)
-                node.remoter.send_files(src='./configurations/io.conf', dst=f'{INSTALL_DIR}/etc/scylla.d/')
-                node.remoter.send_files(src='./configurations/io_properties.yaml', dst=f'{INSTALL_DIR}/etc/scylla.d/')
-                node.remoter.run(
-                    f"sed -ie 's/io-properties-file=/io-properties-file=\/home\/{TEST_USER}\/scylladb/g' {INSTALL_DIR}/etc/scylla.d/io.conf")
-                node.remoter.run(
-                    f"sed -ie 's/mountpoint: .*/mountpoint: \/home\/{TEST_USER}\/scylladb/g' {INSTALL_DIR}/etc/scylla.d/io_properties.yaml")
-
-                # simple config
-                node.remoter.run(
-                    f"echo 'cluster_name: \"{self.name}\"' >> {INSTALL_DIR}/etc/scylla/scylla.yaml")  # pylint: disable=no-member
-                node.remoter.run(
-                    f"sed -ie 's/- seeds: .*/- seeds: {node.ip_address}/g' {INSTALL_DIR}/etc/scylla/scylla.yaml")
-                node.remoter.run(
-                    f"sed -ie 's/^listen_address: .*/listen_address: {node.ip_address}/g' {INSTALL_DIR}/etc/scylla/scylla.yaml")
-                node.remoter.run(
-                    f"sed -ie 's/^rpc_address: .*/rpc_address: {node.ip_address}/g' {INSTALL_DIR}/etc/scylla/scylla.yaml")
-
-                node.start_scylla_server(verify_up=False, verify_up_timeout=timeout)
-                node.wait_db_up(verbose=verbose, timeout=timeout)
-                node.wait_jmx_up(verbose=verbose, timeout=200)
+                self.scylla_configure_non_root_installation(node=node, devname=nic_devname,
+                                                            verbose=verbose, timeout=timeout)
                 return
 
             self.get_scylla_version()
@@ -4088,7 +4112,7 @@ class BaseScyllaCluster:  # pylint: disable=too-many-public-methods, too-many-in
                 node.datacenter_setup(self.datacenter)  # pylint: disable=no-member
             self.node_config_setup(node, ','.join(self.seed_nodes_ips), self.get_endpoint_snitch())
 
-            self._scylla_post_install(node, install_scylla, devname)
+            self._scylla_post_install(node, install_scylla, nic_devname)
 
             # prepare and start saslauthd service
             if self.params.get('prepare_saslauthd'):
@@ -4101,13 +4125,11 @@ class BaseScyllaCluster:  # pylint: disable=too-many-public-methods, too-many-in
                 node.start_scylla_server(verify_up=False)
 
             # code to increase java heap memory to scylla-jmx (because of #7609)
-            jmx_memory = self.params.get("jmx_heap_memory")
-            if jmx_memory:
+            if jmx_memory := self.params.get("jmx_heap_memory"):
                 node.increase_jmx_heap_memory(jmx_memory)
                 node.restart_scylla_jmx()
 
-            self.log.info('io.conf right after reboot')
-            node.remoter.sudo('cat /etc/scylla.d/io.conf')
+            self.log.info('io.conf right after reboot: %s', node.remoter.sudo('cat /etc/scylla.d/io.conf').stdout)
 
             if self.params.get('use_mgmt'):
                 self.install_scylla_manager(node)
@@ -4390,7 +4412,7 @@ class BaseLoaderSet():
             self.log.debug('Gemini version {}'.format(self.gemini_version))
 
     def node_setup(self, node, verbose=False, db_node_address=None, **kwargs):  # pylint: disable=unused-argument
-        # pylint: disable=too-many-statements
+        # pylint: disable=too-many-statements,too-many-branches
 
         self.log.info('Setup in BaseLoaderSet')
         node.wait_ssh_up(verbose=verbose)
@@ -4664,7 +4686,7 @@ class BaseLoaderSet():
             echo 'export GOPATH=$HOME/go' >> $HOME/.bash_profile
             echo 'export PATH=$PATH:/usr/local/go/bin' >> $HOME/.bash_profile
             source $HOME/.bash_profile
-            GO111MODULE=on go get -v -u github.com/scylladb/scylla-bench
+            GO111MODULE=on go get -v github.com/scylladb/scylla-bench@v0.1.2
         """))
 
 
@@ -4908,7 +4930,7 @@ class BaseMonitorSet:  # pylint: disable=too-many-public-methods,too-many-instan
 
     @staticmethod
     def start_node_exporter(node):
-        start_node_exporter_script = dedent(f'''
+        start_node_exporter_script = dedent('''
             docker run --restart=always -d --net="host" --pid="host" -v "/:/host:ro,rslave" --cap-add=SYS_TIME \
             quay.io/prometheus/node-exporter --path.rootfs=/host
         ''')
@@ -5203,7 +5225,7 @@ class BaseMonitorSet:  # pylint: disable=too-many-public-methods,too-many-instan
             if snapshot_archive := PrometheusSnapshots(name='prometheus_snapshot').collect(self.nodes[0], self.logdir):
                 self.log.debug("Snapshot local path: %s", snapshot_archive)
                 return upload_archive_to_s3(snapshot_archive, TestConfig.test_id())
-        except Exception as details:
+        except Exception as details:  # pylint: disable=broad-except
             self.log.error("Error downloading prometheus data dir: %s", details)
         return ""
 
@@ -5259,5 +5281,18 @@ class LocalNode(BaseNode):
     def _refresh_instance_state(self):
         return ['127.0.0.1'], ['127.0.0.1']
 
+    @property
+    def region(self):
+        pass
+
     def set_keep_alive(self):
+        pass
+
+    def restart(self):
+        pass
+
+    def _get_ipv6_ip_address(self):
+        pass
+
+    def check_spot_termination(self):
         pass

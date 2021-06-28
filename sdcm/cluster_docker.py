@@ -153,12 +153,12 @@ class DockerCluster(cluster.BaseCluster):  # pylint: disable=abstract-method
         self.node_container_image_tag = f"scylla-sct:{node_type}-{str(cluster.TestConfig.test_id())[:8]}"
         self.node_container_key_file = node_key_file
 
-        super(DockerCluster, self).__init__(cluster_prefix=cluster_prefix,
-                                            node_prefix=node_prefix,
-                                            n_nodes=n_nodes,
-                                            params=params,
-                                            region_names=["localhost-dc", ],  # Multi DC is not supported currently.
-                                            node_type=node_type)
+        super().__init__(cluster_prefix=cluster_prefix,
+                         node_prefix=node_prefix,
+                         n_nodes=n_nodes,
+                         params=params,
+                         region_names=["localhost-dc", ],  # Multi DC is not supported currently.
+                         node_type=node_type)
 
     def _create_node(self, node_index, container=None):
         node = DockerNode(parent_cluster=self,
@@ -232,8 +232,7 @@ class ScyllaDockerCluster(cluster.BaseScyllaCluster, DockerCluster):  # pylint: 
 
         node.wait_ssh_up(verbose=verbose)
 
-        if not node.is_scylla_installed():
-            raise Exception(f"There is no pre-installed ScyllaDB")
+        node.is_scylla_installed(raise_if_not_installed=True)
 
         self.check_aio_max_nr(node)
 
@@ -266,7 +265,7 @@ class ScyllaDockerCluster(cluster.BaseScyllaCluster, DockerCluster):  # pylint: 
                 f"is less than recommended value ({recommended_value})")
 
     @cluster.wait_for_init_wrap
-    def wait_for_init(self, node_list=None, verbose=False, timeout=None, *_, **__):
+    def wait_for_init(self, node_list=None, verbose=False, timeout=None, check_node_health=True):
         node_list = node_list if node_list else self.nodes
         self.wait_for_nodes_up_and_normal(nodes=node_list)
 
@@ -401,12 +400,12 @@ class MonitorSetDocker(cluster.BaseMonitorSet, DockerCluster):  # pylint: disabl
         for node in self.nodes:
             try:
                 self.stop_scylla_monitoring(node)
-                self.log.error(f"Stopping scylla monitoring succeeded")
+                self.log.error("Stopping scylla monitoring succeeded")
             except Exception as exc:  # pylint: disable=broad-except
                 self.log.error(f"Stopping scylla monitoring failed with {str(exc)}")
             try:
                 node.remoter.sudo(f"rm -rf '{self._monitor_install_path_base}'")
-                self.log.error(f"Cleaning up scylla monitoring succeeded")
+                self.log.error("Cleaning up scylla monitoring succeeded")
             except Exception as exc:  # pylint: disable=broad-except
                 self.log.error(f"Cleaning up scylla monitoring failed with {str(exc)}")
             node.destroy()

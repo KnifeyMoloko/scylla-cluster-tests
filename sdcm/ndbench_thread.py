@@ -20,7 +20,7 @@ from distutils.util import strtobool  # pylint: disable=import-error,no-name-in-
 from typing import Any
 
 from sdcm.prometheus import nemesis_metrics_obj
-from sdcm.sct_events.loaders import NdbenchStressEvent, NDBENCH_ERROR_EVENTS_PATTERNS
+from sdcm.sct_events.loaders import NDBENCH_ERROR_EVENTS_PATTERNS, NdBenchStressEvent
 from sdcm.utils.common import FileFollowerThread
 from sdcm.remote import FailuresWatcher
 from sdcm.utils.docker_remote import RemoteDocker
@@ -141,10 +141,6 @@ class NdBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-many-
         log_file_name = os.path.join(loader.logdir, f'ndbench-l{loader_idx}-c{cpu_idx}-{uuid.uuid4()}.log')
         LOGGER.info('ndbench local log: %s', log_file_name)
 
-        def raise_event_callback(sentinel, line):  # pylint: disable=unused-argument
-            if line:
-                NdbenchStressEvent.error(node=loader, stress_cmd=self.stress_cmd, errors=[str(line), ]).publish()
-
         LOGGER.info("running: %s", self.stress_cmd)
 
         if self.stress_num > 1:
@@ -157,7 +153,7 @@ class NdBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-many-
 
         node_cmd = f'STRESS_TEST_MARKER={self.shell_marker}; {node_cmd}'
 
-        NdbenchStressEvent.start(node=loader, stress_cmd=self.stress_cmd).publish()
+        NdBenchStressEvent.start(node=loader, stress_cmd=self.stress_cmd).publish()
 
         with NdBenchStatsPublisher(loader, loader_idx, ndbench_log_filename=log_file_name), \
                 NdBenchStressEventsPublisher(node=loader, ndbench_log_filename=log_file_name) as events_publisher:
@@ -169,11 +165,11 @@ class NdBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-many-
                                   verbose=True)
             except Exception as exc:
 
-                NdbenchStressEvent.failure(node=str(loader),
+                NdBenchStressEvent.failure(node=str(loader),
                                            stress_cmd=self.stress_cmd,
                                            log_file_name=log_file_name,
                                            errors=[format_stress_cmd_error(exc), ]).publish()
             finally:
-                NdbenchStressEvent.finish(node=loader,
+                NdBenchStressEvent.finish(node=loader,
                                           stress_cmd=self.stress_cmd,
                                           log_file_name=log_file_name).publish()

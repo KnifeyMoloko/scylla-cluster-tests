@@ -21,19 +21,23 @@ class StressTestConfigParser(ABC):
         except Exception as e:
             raise StressTestConfigParserError(e)
 
+    @property
+    def stress_config(self) -> Dict[str, Any]:
+        return self._config["stress_config"]
+
     @abstractmethod
     def parse_config(self):
         return NotImplemented
 
 
-class NdBenchConfigParser(StressTestConfigParser):
+class NdBenchCLIConfigParser(StressTestConfigParser):
     def parse_config(self) -> Dict[str, Any]:
         return self._config
 
     def parse_config_as_cli_command(self) -> str:
         command_tokens = ["./gradlew"]
         common_prefix = "-Dndbench.config"
-        for key, value in self._config["stress_config"].items():
+        for key, value in self.stress_config.items():
             if key == "type":
                 pass
             if "cass" in key:
@@ -47,6 +51,6 @@ class NdBenchConfigParser(StressTestConfigParser):
 
 if __name__ == "__main__":
     cfg_path = '/home/mc/scylla-cluster-tests/test-cases/longevity/mc-longevity-ndbench-100gb-4h_alt.yaml'
-    parser = NdBenchConfigParser()
+    parser = NdBenchCLIConfigParser()
     parser.load_config(cfg_path)
     print(parser.parse_config_as_cli_command())

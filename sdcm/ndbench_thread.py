@@ -20,7 +20,7 @@ from distutils.util import strtobool  # pylint: disable=import-error,no-name-in-
 from typing import Any
 
 from sdcm.prometheus import nemesis_metrics_obj
-from sdcm.sct_events.loaders import NDBENCH_ERROR_EVENTS_PATTERNS, NdBenchStressEvent
+from sdcm.sct_events.loaders import NDBENCH_ERROR_EVENTS_PATTERNS, NdBenchStressEvent, NdBenchLogEvent, NdBenchEvent
 from sdcm.utils.common import FileFollowerThread
 from sdcm.remote import FailuresWatcher
 from sdcm.utils.docker_remote import RemoteDocker
@@ -44,18 +44,21 @@ class NdBenchStressEventsPublisher(FileFollowerThread):
                 time.sleep(0.5)
                 continue
 
-            for line_number, line in enumerate(self.follow_file(self.cs_log_filename)):
-                if self.stopped():
-                    break
-
-                for pattern, event in NDBENCH_ERROR_EVENTS_PATTERNS:
-                    if self.event_id:
-                        # Connect the event to the stress load
-                        event.event_id = self.event_id
-
-                    if pattern.search(line):
-                        event.add_info(node=self.node, line=line, line_number=line_number).publish()
-                        break  # Stop iterating patterns to avoid creating two events for one line of the log
+            for line_number, line in enumerate(self.follow_file(self.cs_log_filename), start=1):
+                ndbench_event = NdBenchLogEvent.Any(verbose=True)
+                ndbench_event.add_info(node=self.node, line=line, line_number=line_number)
+                ndbench_event.event_id = self.event_id
+                ndbench_event.publish()
+                #
+                #
+                # for pattern, event in NDBENCH_ERROR_EVENTS_PATTERNS:
+                #     if self.event_id:
+                #         # Connect the event to the stress load
+                #         event.event_id = self.event_id
+                #
+                #     if pattern.search(line):
+                #         event.add_info(node=self.node, line=line, line_number=line_number).publish()
+                #         break  # Stop iterating patterns to avoid creating two events for one line of the log
 
 
 class NdBenchStatsPublisher(FileFollowerThread):
@@ -141,6 +144,12 @@ class NdBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-many-
         log_file_name = os.path.join(loader.logdir, f'ndbench-l{loader_idx}-c{cpu_idx}-{uuid.uuid4()}.log')
         LOGGER.info('ndbench local log: %s', log_file_name)
 
+        def raise_event_callback(sentinel, line):  # pylint: disable=unused-argument
+            if line:
+                ndbench_event = NdBenchLogEvent.Any()
+                ndbench_event.add_info(node=loader, line=line, line_number=99)
+                ndbench_event.publish()
+
         LOGGER.info("running: %s", self.stress_cmd)
 
         if self.stress_num > 1:
@@ -155,16 +164,22 @@ class NdBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-many-
 
         NdBenchStressEvent.start(node=loader, stress_cmd=self.stress_cmd).publish()
 
-        with NdBenchStatsPublisher(loader, loader_idx, ndbench_log_filename=log_file_name), \
-                NdBenchStressEventsPublisher(node=loader, ndbench_log_filename=log_file_name) as events_publisher:
+        with NdBenchStressEventsPublisher(node=loader, ndbench_log_filename=log_file_name) \
+                as events_publisher, \
+                NdBenchEvent(node=loader, stress_cmd=node_cmd, log_file_name=log_file_name) \
+                        as ndbench_stress_event:
             try:
-                return docker.run(cmd=node_cmd,
-                                  timeout=self.timeout + self.shutdown_timeout,
-                                  ignore_status=True,
-                                  log_file=log_file_name,
-                                  verbose=True)
-            except Exception as exc:
+                events_publisher.event_id = ndbench_stress_event.event_id
+                docker.run(cmd=node_cmd,
+                           timeout=self.timeout + self.shutdown_timeout,
+                           ignore_status=True,
+                           log_file=log_file_name,
+                           verbose=True,
+                           watchers=[FailuresWatcher(r'.*',
+                                                     callback=raise_event_callback,
+                                                     raise_exception=False)])
 
+            except Exception as exc:
                 NdBenchStressEvent.failure(node=str(loader),
                                            stress_cmd=self.stress_cmd,
                                            log_file_name=log_file_name,

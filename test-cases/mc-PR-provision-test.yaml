@@ -1,0 +1,17 @@
+test_duration: 30
+stress_cmd: ["cassandra-stress write cl=QUORUM duration=1m -schema 'replication(factor=1) compaction(strategy=SizeTieredCompactionStrategy)' -port jmx=6868 -mode cql3 native -rate threads=10 -pop seq=1..10000 -log interval=5"]
+
+prepare_write_cmd:  ["scylla-bench -workload=sequential -mode=write -max-rate=30 -replication-factor=1 -partition-count=10 -clustering-row-count=100 -clustering-row-size=5120 -concurrency=7 -rows-per-request=10",
+                     "scylla-bench -workload=uniform -mode=read -replication-factor=1 -partition-count=10 -clustering-row-count=100 -clustering-row-size=5120 -rows-per-request=10 -concurrency=7 -max-rate=320 -duration=1m"
+                    ]
+
+n_db_nodes: 2
+n_loaders: 1
+n_monitor_nodes: 1
+instance_type_db: 'i3.large'
+
+user_prefix: 'mc-PR-provision-test'
+
+post_behavior_db_nodes: "destroy"
+post_behavior_loader_nodes: "destroy"
+post_behavior_monitor_nodes: "destroy"

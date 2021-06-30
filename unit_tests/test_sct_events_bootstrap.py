@@ -10,14 +10,68 @@
 # See LICENSE for more details.
 #
 # Copyright (c) 2021 ScyllaDB
-
-
+import os
 import time
 import unittest
 import uuid
 from pathlib import Path
+from threading import Thread
+from typing import List
 
 from sdcm.sct_events.database import BootstrapEvent
+from sdcm.utils.common import FileFollowerThread
+
+LOGS = [
+            "Disabling 'apt-daily' and 'apt-daily-upgrade' services...",
+            "Waiting for preinstalled Scylla",
+            "Waiting for Scylla Machine Image setup to finish...",
+            "Done waiting for preinstalled Scylla",
+            "Found ScyllaDB version with details: 4.5.rc3-0.20210620.706de00ef "
+            "with build-id d28ca2bf35abaa8bbf9a2b5b401a0bbe20ad506e",
+            "Found ScyllaDB version: 4.5.rc3",
+            "Installing Scylla debug info...",
+            'io.conf right after reboot: SEASTAR_IO = "--io-properties-file=/etc/scylla.d/io_properties.yaml"',
+            "Starting Scylla Server...",
+            "Setup in BaseLoaderSet",
+            "(1/1) nodes ready, node Node "
+            "longevity-ndbench-100gb-4h-ndbench--loader-node-4d77cb84-1 "
+            "[54.247.62.34 | 10.0.2.165] (seed: False). Time elapsed: 245 s",
+            "Verifying Scylla repo file",
+            "Running: ./gradlew appRun",
+            "Starting a Gradle Daemon, 1 incompatible and 1 stopped Daemons "
+            "could not be reused, use --status for details",
+            "Configure project :ndbench-api",
+        ]
+
+
+class MockEventsPublisher(FileFollowerThread):
+    def __init__(self, node: str, mock_log_filename: str, event_id: str = None):
+        super().__init__()
+
+        self.node = str(node)
+        self.mock_log_filename = mock_log_filename
+        self.event_id = event_id
+        self.start_time = time.time()
+
+    def run(self) -> None:
+        while not self.stopped() and (time.time() - self.start_time) < 30:
+            if not os.path.isfile(self.mock_log_filename):
+                time.sleep(0.5)
+                continue
+
+            for line_number, line in enumerate(self.follow_file(self.mock_log_filename)):
+                if self.stopped():
+                    break
+
+                print(f"{line_number} : {line}")
+                # for pattern, event in CS_ERROR_EVENTS_PATTERNS:
+                #     if self.event_id:
+                #         # Connect the event to the stress load
+                #         event.event_id = self.event_id
+                #
+                #     if pattern.search(line):
+                #         event.add_info(node=self.node, line=line, line_number=line_number).publish()
+                #         break  # Stop iterating patterns to avoid creating two events for one line of the log
 
 
 class TestBootstrapEvent(unittest.TestCase):
@@ -80,3 +134,33 @@ class TestBootstrapEvent(unittest.TestCase):
                    f"duration={duration_fmt} node={self.node} errors=['{errors[0]}']"
 
         self.assertEqual(actual, expected)
+
+    def test_trigger_bootstrap_begin_with_file_follower(self):
+        from pprint import pprint
+        writer_thread = self._get_logs_writer_thread()
+        writer_thread.start()
+        print(f"Writer thread status before: {writer_thread.is_alive()}")
+        time.sleep(20)
+        writer_thread.join()
+        print(f"Writer thread status after: {writer_thread.is_alive()}")
+        # with self.temp_log_file_path.open(mode="r") as infile:
+        #     print("I'm inside")
+        #     for line in infile:
+        #         print("I'm even more inside")
+        #         print(line)
+        print(self.temp_log_file_path.read_text())
+
+        # with some_file_follower_ctx as publisher:
+        #     run_for_a_while()
+
+        # check the event registry/queue
+
+    def _write_logs(self, log_list: List[str]):
+        with self.temp_log_file_path.open(mode="w") as infile:
+            while log_list:
+                infile.write(log_list.pop() + "\n")
+                time.sleep(10)
+
+    def _get_logs_writer_thread(self) -> Thread:
+        t = Thread(target=self._write_logs, args=(), kwargs={"log_list": LOGS})
+        return t

@@ -15,7 +15,7 @@ import re
 import logging
 import time
 from re import Pattern
-from typing import Type, List, Tuple, Generic, Optional
+from typing import Type, List, Tuple, Generic, Optional, Any
 
 from sdcm.sct_events import Severity, SctEventProtocol
 from sdcm.sct_events.base import SctEvent, LogEvent, LogEventProtocol, T_log_event, InformationalEvent, \
@@ -229,12 +229,14 @@ class BootstrapEvent(DatabaseEvent):
 
 class DBLogReaderThread(FileFollowerThread):
     def __init__(self,
+                 base_node: Any,
                  log_file_path: str,
                  test_config: TestConfig = None,
                  start_from_beginning: bool = False,
                  exclude_from_logging: List[Tuple[Pattern, LogEventProtocol]] = None,
                  last_log_position: int = 0,
                  last_line_num: int = 0):
+        self.base_node = base_node
         self._log_file_path = log_file_path
         self.test_config = test_config
         self._start_from_beginning = start_from_beginning
@@ -243,6 +245,7 @@ class DBLogReaderThread(FileFollowerThread):
         self._last_line_no = last_line_num
         self._backtraces = []
         self._system_log_errors_index = []
+        self.file_iter = self.follow_file(self._log_file_path)
         super().__init__()
 
     @property
@@ -251,11 +254,19 @@ class DBLogReaderThread(FileFollowerThread):
 
     def run(self):
         while not self.stopped():
-            if not os.path.isfile(self._log_file_path):
-                time.sleep(0.1)
-                continue
+            # if not os.path.isfile(self._log_file_path):
+            #     time.sleep(0.1)
+            #     continue
+            time.sleep(30)
+            DatabaseLogEvent.BOOT().clone().add_info(node=self.base_node,
+                                                     line_number=999,
+                                                     line=f"Next line: {self._get_line()}")
 
-            self._read_file()
+            # self._read_file()
+
+    def _get_line(self):
+        yield next(self.file_iter)
+
 
     def _read_file(self):
         if self._start_from_beginning:

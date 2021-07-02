@@ -69,7 +69,7 @@ from sdcm.utils.common import (
     get_test_name,
     update_authenticator,
     prepare_and_start_saslauthd_service,
-    change_default_password, FileFollowerThread,
+    change_default_password, FileFollowerThread, FileFollowerIterator,
 )
 from sdcm.utils.distro import Distro
 from sdcm.utils.docker_utils import ContainerManager, NotFound
@@ -816,10 +816,11 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         self._coredump_thread.start()
 
     def start_db_log_reader_thread(self):
-        self._db_log_reader_thread = threading.Thread(
-            target=self.db_log_reader_thread, name='LogReaderThread', daemon=True)
-        # self._db_log_reader_thread = DBLogReaderThread(log_file_path=self.system_log,
-        #                                                exclude_from_logging=SYSTEM_ERROR_EVENTS_PATTERNS)
+        # self._db_log_reader_thread = threading.Thread(
+        #     target=self.db_log_reader_thread, name='LogReaderThread', daemon=True)
+        self._db_log_reader_thread = DBLogReaderThread(base_node=self,
+                                                       log_file_path=self.system_log,
+                                                       exclude_from_logging=SYSTEM_ERROR_EVENTS_PATTERNS)
         self._db_log_reader_thread.start()
 
     # class DBLogReaderThread(FileFollowerThread):

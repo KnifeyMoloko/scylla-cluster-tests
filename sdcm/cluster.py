@@ -27,7 +27,8 @@ import uuid
 import itertools
 import json
 import ipaddress
-from typing import List, Optional, Dict, Union, Set
+from re import Pattern
+from typing import List, Optional, Dict, Union, Set, Tuple
 from datetime import datetime
 from textwrap import dedent
 from functools import cached_property, wraps
@@ -80,12 +81,13 @@ from sdcm.utils.remotewebbrowser import WebDriverContainerMixin
 from sdcm.test_config import TestConfig
 from sdcm.utils.version_utils import SCYLLA_VERSION_RE, get_gemini_version, get_systemd_version
 from sdcm.sct_events import Severity
-from sdcm.sct_events.base import LogEvent
+from sdcm.sct_events.base import LogEvent, LogEventProtocol
 from sdcm.sct_events.health import ClusterHealthValidatorEvent
 from sdcm.sct_events.system import TestFrameworkEvent
 from sdcm.sct_events.filters import DbEventsFilter
 from sdcm.sct_events.grafana import set_grafana_url
-from sdcm.sct_events.database import SYSTEM_ERROR_EVENTS_PATTERNS, BACKTRACE_RE, DatabaseLogEvent, ScyllaHelpErrorEvent
+from sdcm.sct_events.database import SYSTEM_ERROR_EVENTS_PATTERNS, BACKTRACE_RE, DatabaseLogEvent, ScyllaHelpErrorEvent, \
+    DBLogReaderThread
 from sdcm.sct_events.nodetool import NodetoolEvent
 from sdcm.sct_events.decorators import raise_event_on_failure
 from sdcm.utils.auto_ssh import AutoSshContainerMixin
@@ -816,100 +818,102 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
     def start_db_log_reader_thread(self):
         self._db_log_reader_thread = threading.Thread(
             target=self.db_log_reader_thread, name='LogReaderThread', daemon=True)
+        # self._db_log_reader_thread = DBLogReaderThread(log_file_path=self.system_log,
+        #                                                exclude_from_logging=SYSTEM_ERROR_EVENTS_PATTERNS)
         self._db_log_reader_thread.start()
 
-    class DBLogReaderThread(FileFollowerThread):
-        def __init__(self,
-                     log_file_path: str,
-                     start_from_beginning: bool = False,
-                     exclude_from_logging: List[str] = None,
-                     last_log_position: int = 0,
-                     last_line_num: int = 0):
-            super().__init__()
-            self._log_file_path = log_file_path
-            self._start_from_beginning = start_from_beginning
-            self._exclude_from_logging = exclude_from_logging
-            self._start_search_from_byte = last_log_position
-            self._last_line_no = last_line_num
-            self._backtraces = []
-            self._system_log_errors_index = []
-
-        def run(self):
-            while not self.stopped():
-                if not os.path.isfile(self._log_file_path):
-                    time.sleep(0.1)
-                    continue
-
-                self._read_file()
-
-        def _read_file(self):
-            if self._start_from_beginning:
-                self._start_search_from_byte = 0
-                self._last_line_no = 0
-
-            with open(self._log_file_path, mode="r") as db_file:
-                if self._start_search_from_byte:
-                    db_file.seek(self._start_search_from_byte)
-
-                for index, line in enumerate(db_file, start=self._last_line_no):
-                    json_log = None
-                    if line[0] == '{':
-                        try:
-                            json_log = json.loads(line)
-                        except Exception as exc:
-                            LOGGER.debug(exc)
-                    if not self._start_from_beginning and TestConfig.RSYSLOG_ADDRESS:
-                        line = line.strip()
-                        if not self._exclude_from_logging:
-                            LOGGER.debug(line)
-                        else:
-                            exclude = False
-                            for pattern in self._exclude_from_logging:
-                                if pattern not in line:
-                                    break
-                                else:
-                                    LOGGER.debug(line)
-                    if json_log:
-                        continue
-
-                    #  convoluted backtrace handling
-                    match = BACKTRACE_RE.search(line)
-                    one_line_backtrace = []
-                    if match and self._backtraces:
-                        data = match.groupdict()
-                        if data['other_bt']:
-                            self._backtraces[-1]['backtrace'] += [data['other_bt'].strip()]
-                        if data['scylla_bt']:
-                            self._backtraces[-1]['backtrace'] += [data['scylla_bt'].strip()]
-                    elif "backtrace:" in line.lower() and "0x" in line:
-                        # This part handles the backtrases are printed in one line.
-                        # Example:
-                        # [shard 2] seastar - Exceptional future ignored: exceptions::mutation_write_timeout_exception
-                        # (Operation timed out for system.paxos - received only 0 responses from 1 CL=ONE.),
-                        # backtrace:   0x3316f4d#012  0x2e2d177#012  0x189d397#012  0x2e76ea0#012  0x2e770af#012
-                        # 0x2eaf065#012  0x2ebd68c#012  0x2e48d5d#012  /opt/scylladb/libreloc/libpthread.so.0+0x94e1#012
-                        splitted_line = re.split("backtrace:", line, flags=re.IGNORECASE)
-                        for trace_line in splitted_line[1].split():
-                            if trace_line.startswith('0x') or 'scylladb/lib' in trace_line:
-                                one_line_backtrace.append(trace_line)
-
-                    # actual filter and decision for the line
-                    if index not in self._system_log_errors_index or self._start_from_beginning:
-                        # for each line use all regexes to match, and if found send an event
-                        for pattern, event in SYSTEM_ERROR_EVENTS_PATTERNS:
-                            match = pattern.search(line)
-                            if match:
-                                self._system_log_errors_index.append(index)
-                                cloned_event = event.clone().add_info(node=self, line_number=index, line=line)
-                                self._backtraces.append(dict(event=cloned_event, backtrace=[]))
-                                break  # Stop iterating patterns to avoid creating two events for one line of the log
-
-                    if one_line_backtrace and self._backtraces:
-                        self._backtraces[-1]['backtrace'] = one_line_backtrace
-
-                if not self._start_from_beginning:
-                    self._last_line_no = index if index else self._last_line_no
-                    self._last_log_position = db_file.tell() + 1
+    # class DBLogReaderThread(FileFollowerThread):
+    #     def __init__(self,
+    #                  log_file_path: str,
+    #                  start_from_beginning: bool = False,
+    #                  exclude_from_logging: List[Tuple[Pattern, LogEventProtocol]] = None,
+    #                  last_log_position: int = 0,
+    #                  last_line_num: int = 0):
+    #         super().__init__()
+    #         self._log_file_path = log_file_path
+    #         self._start_from_beginning = start_from_beginning
+    #         self._exclude_from_logging = exclude_from_logging
+    #         self._start_search_from_byte = last_log_position
+    #         self._last_line_no = last_line_num
+    #         self._backtraces = []
+    #         self._system_log_errors_index = []
+    #
+    #     def run(self):
+    #         while not self.stopped():
+    #             if not os.path.isfile(self._log_file_path):
+    #                 time.sleep(0.1)
+    #                 continue
+    #
+    #             self._read_file()
+    #
+    #     def _read_file(self):
+    #         if self._start_from_beginning:
+    #             self._start_search_from_byte = 0
+    #             self._last_line_no = 0
+    #
+    #         with open(self._log_file_path, mode="r") as db_file:
+    #             if self._start_search_from_byte:
+    #                 db_file.seek(self._start_search_from_byte)
+    #
+    #             for index, line in enumerate(db_file, start=self._last_line_no):
+    #                 json_log = None
+    #                 if line[0] == '{':
+    #                     try:
+    #                         json_log = json.loads(line)
+    #                     except Exception as exc:
+    #                         LOGGER.debug(exc)
+    #                 if not self._start_from_beginning and TestConfig.RSYSLOG_ADDRESS:
+    #                     line = line.strip()
+    #                     if not self._exclude_from_logging:
+    #                         LOGGER.debug(line)
+    #                     else:
+    #                         exclude = False
+    #                         for pattern in self._exclude_from_logging:
+    #                             if pattern not in line:
+    #                                 break
+    #                             else:
+    #                                 LOGGER.debug(line)
+    #                 if json_log:
+    #                     continue
+    #
+    #                 #  convoluted backtrace handling
+    #                 match = BACKTRACE_RE.search(line)
+    #                 one_line_backtrace = []
+    #                 if match and self._backtraces:
+    #                     data = match.groupdict()
+    #                     if data['other_bt']:
+    #                         self._backtraces[-1]['backtrace'] += [data['other_bt'].strip()]
+    #                     if data['scylla_bt']:
+    #                         self._backtraces[-1]['backtrace'] += [data['scylla_bt'].strip()]
+    #                 elif "backtrace:" in line.lower() and "0x" in line:
+    #                     # This part handles the backtrases are printed in one line.
+    #                     # Example:
+    #                     # [shard 2] seastar - Exceptional future ignored: exceptions::mutation_write_timeout_exception
+    #                     # (Operation timed out for system.paxos - received only 0 responses from 1 CL=ONE.),
+    #                     # backtrace:   0x3316f4d#012  0x2e2d177#012  0x189d397#012  0x2e76ea0#012  0x2e770af#012
+    #                     # 0x2eaf065#012  0x2ebd68c#012  0x2e48d5d#012  /opt/scylladb/libreloc/libpthread.so.0+0x94e1#012
+    #                     splitted_line = re.split("backtrace:", line, flags=re.IGNORECASE)
+    #                     for trace_line in splitted_line[1].split():
+    #                         if trace_line.startswith('0x') or 'scylladb/lib' in trace_line:
+    #                             one_line_backtrace.append(trace_line)
+    #
+    #                 # actual filter and decision for the line
+    #                 if index not in self._system_log_errors_index or self._start_from_beginning:
+    #                     # for each line use all regexes to match, and if found send an event
+    #                     for pattern, event in SYSTEM_ERROR_EVENTS_PATTERNS:
+    #                         match = pattern.search(line)
+    #                         if match:
+    #                             self._system_log_errors_index.append(index)
+    #                             cloned_event = event.clone().add_info(node=self, line_number=index, line=line)
+    #                             self._backtraces.append(dict(event=cloned_event, backtrace=[]))
+    #                             break  # Stop iterating patterns to avoid creating two events for one line of the log
+    #
+    #                 if one_line_backtrace and self._backtraces:
+    #                     self._backtraces[-1]['backtrace'] = one_line_backtrace
+    #
+    #             if not self._start_from_beginning:
+    #                 self._last_line_no = index if index else self._last_line_no
+    #                 self._last_log_position = db_file.tell() + 1
 
     def start_alert_manager_thread(self):
         self._alert_manager = PrometheusAlertManagerListener(self.external_address, stop_flag=self.termination_event)

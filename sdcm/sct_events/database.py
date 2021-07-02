@@ -10,14 +10,18 @@
 # See LICENSE for more details.
 #
 # Copyright (c) 2020 ScyllaDB
-
+import os
 import re
 import logging
+import time
+from re import Pattern
 from typing import Type, List, Tuple, Generic, Optional
 
 from sdcm.sct_events import Severity, SctEventProtocol
 from sdcm.sct_events.base import SctEvent, LogEvent, LogEventProtocol, T_log_event, InformationalEvent, \
     DatabaseEvent
+from sdcm.test_config import TestConfig
+from sdcm.utils.common import FileFollowerThread
 
 TOLERABLE_REACTOR_STALL: int = 1000  # ms
 
@@ -221,3 +225,89 @@ class IndexSpecialColumnErrorEvent(InformationalEvent):
 
 class BootstrapEvent(DatabaseEvent):
     ...
+
+
+class DBLogReaderThread(FileFollowerThread):
+    def __init__(self,
+                 log_file_path: str,
+                 test_config: TestConfig = None,
+                 start_from_beginning: bool = False,
+                 exclude_from_logging: List[Tuple[Pattern, LogEventProtocol]] = None,
+                 last_log_position: int = 0,
+                 last_line_num: int = 0):
+        self._log_file_path = log_file_path
+        self.test_config = test_config
+        self._start_from_beginning = start_from_beginning
+        self._exclude_from_logging = exclude_from_logging
+        self._start_search_from_byte = last_log_position
+        self._last_line_no = last_line_num
+        self._backtraces = []
+        self._system_log_errors_index = []
+        super().__init__()
+
+    @property
+    def is_alive(self):
+        return not self.stopped()
+
+    def run(self):
+        while not self.stopped():
+            if not os.path.isfile(self._log_file_path):
+                time.sleep(0.1)
+                continue
+
+            self._read_file()
+
+    def _read_file(self):
+        if self._start_from_beginning:
+            self._start_search_from_byte = 0
+            self._last_line_no = 0
+
+        with open(self._log_file_path, mode="r") as db_file:
+            if self._start_search_from_byte:
+                db_file.seek(self._start_search_from_byte)
+
+            for index, line in enumerate(self.follow_file(self._log_file_path)):
+                #  the "continuation branch"
+                # if not self._start_from_beginning and self.test_config.RSYSLOG_ADDRESS:
+                line = line.strip()
+                for pattern in self._exclude_from_logging:
+                    if pattern in line:
+                        LOGGER.debug(f"Found pattern: {pattern} in: {line}")
+                        # self._handle_backtraces(line)
+                        self._filter_line(index=index, line=line)
+
+    def _handle_backtraces(self, line: str):
+        match = BACKTRACE_RE.search(line)
+        one_line_backtrace = []
+        if match and self._backtraces:
+            data = match.groupdict()
+            if data['other_bt']:
+                self._backtraces[-1]['backtrace'] += [data['other_bt'].strip()]
+            if data['scylla_bt']:
+                self._backtraces[-1]['backtrace'] += [data['scylla_bt'].strip()]
+            elif "backtrace:" in line.lower() and "0x" in line:
+                # This part handles the backtrases are printed in one line.
+                # Example:
+                # [shard 2] seastar - Exceptional future ignored: exceptions::mutation_write_timeout_exception
+                # (Operation timed out for system.paxos - received only 0 responses from 1 CL=ONE.),
+                # backtrace:   0x3316f4d#012  0x2e2d177#012  0x189d397#012  0x2e76ea0#012  0x2e770af#012
+                # 0x2eaf065#012  0x2ebd68c#012  0x2e48d5d#012  /opt/scylladb/libreloc/libpthread.so.0+0x94e1#012
+                split_line = re.split("backtrace:", line, flags=re.IGNORECASE)
+                for trace_line in split_line[1].split():
+                    if trace_line.startswith('0x') or 'scylladb/lib' in trace_line:
+                        one_line_backtrace.append(trace_line)
+
+                    if one_line_backtrace and self._backtraces:
+                        self._backtraces[-1]['backtrace'] = one_line_backtrace
+
+    def _filter_line(self, index: int, line: str):
+        # actual filter and decision for the line
+        if index not in self._system_log_errors_index or self._start_from_beginning:
+            # for each line use all regexes to match, and if found send an event
+            for pattern, event in SYSTEM_ERROR_EVENTS_PATTERNS:
+                match = pattern.search(line)
+                if match:
+                    self._system_log_errors_index.append(index)
+                    cloned_event = event.clone().add_info(node=self, line_number=index, line=line)
+                    self._backtraces.append(dict(event=cloned_event, backtrace=[]))
+                    break  # Stop iterating patterns to avoid creating two events for one line of the log

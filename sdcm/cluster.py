@@ -69,7 +69,7 @@ from sdcm.utils.common import (
     get_test_name,
     update_authenticator,
     prepare_and_start_saslauthd_service,
-    change_default_password, FileFollowerThread, FileFollowerIterator,
+    change_default_password
 )
 from sdcm.utils.distro import Distro
 from sdcm.utils.docker_utils import ContainerManager, NotFound

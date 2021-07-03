@@ -248,25 +248,24 @@ class DBLogReaderThread(FileFollowerThread):
         self.file_iter = self.follow_file(self._log_file_path)
         super().__init__()
 
-    @property
     def is_alive(self):
         return not self.stopped()
 
     def run(self):
-        while not self.stopped():
+        while not self.stopped() and not self.base_node.termination_event.isSet():
             # if not os.path.isfile(self._log_file_path):
             #     time.sleep(0.1)
             #     continue
             time.sleep(30)
             DatabaseLogEvent.BOOT().clone().add_info(node=self.base_node,
                                                      line_number=999,
-                                                     line=f"Next line: {self._get_line()}")
+                                                     line=f"Next line will be here ->")
 
             # self._read_file()
+        self.stop()
 
     def _get_line(self):
-        yield next(self.file_iter)
-
+        return next(self.file_iter)
 
     def _read_file(self):
         if self._start_from_beginning:

@@ -232,20 +232,13 @@ class DBLogReaderThread(FileFollowerThread):
                  base_node: Any,
                  log_file_path: str,
                  test_config: TestConfig = None,
-                 start_from_beginning: bool = False,
-                 exclude_from_logging: List[Tuple[Pattern, LogEventProtocol]] = None,
-                 last_log_position: int = 0,
-                 last_line_num: int = 0):
+                 exclude_from_logging: List[Tuple[Pattern, LogEventProtocol]] = None):
         self.base_node = base_node
         self._log_file_path = log_file_path
         self.test_config = test_config
-        self._start_from_beginning = start_from_beginning
         self._exclude_from_logging = exclude_from_logging
-        self._start_search_from_byte = last_log_position
-        self._last_line_no = last_line_num
         self._backtraces = []
         self._system_log_errors_index = []
-        self.file_iter = self.follow_file(self._log_file_path)
         super().__init__()
 
     def is_alive(self):
@@ -253,19 +246,17 @@ class DBLogReaderThread(FileFollowerThread):
 
     def run(self):
         while not self.stopped() and not self.base_node.termination_event.isSet():
-            # if not os.path.isfile(self._log_file_path):
-            #     time.sleep(0.1)
-            #     continue
-            time.sleep(30)
-            DatabaseLogEvent.BOOT().clone().add_info(node=self.base_node,
-                                                     line_number=999,
-                                                     line=f"Next line will be here ->")
-
-            # self._read_file()
+            if os.path.isfile(self._log_file_path):
+                for line_number, line in enumerate(self.follow_file(self._log_file_path)):
+                    if self.stopped() or self.base_node.termination_event.isSet():
+                        break
+                    #
+                    # DatabaseLogEvent.BOOT().clone().add_info(node=self.base_node,
+                    #                                          line_number=line_number,
+                    #                                          line=f"Hey, new line: {line}")
+                    self._handle_backtraces(line)
+                    self._filter_line(index=line_number, line=line)
         self.stop()
-
-    def _get_line(self):
-        return next(self.file_iter)
 
     def _read_file(self):
         if self._start_from_beginning:
@@ -312,12 +303,14 @@ class DBLogReaderThread(FileFollowerThread):
 
     def _filter_line(self, index: int, line: str):
         # actual filter and decision for the line
-        if index not in self._system_log_errors_index or self._start_from_beginning:
+        if index not in self._system_log_errors_index:
             # for each line use all regexes to match, and if found send an event
+
             for pattern, event in SYSTEM_ERROR_EVENTS_PATTERNS:
                 match = pattern.search(line)
+                LOGGER.info(f"Processing line: {match}")
                 if match:
                     self._system_log_errors_index.append(index)
-                    cloned_event = event.clone().add_info(node=self, line_number=index, line=line)
+                    cloned_event = event.clone().add_info(node=self, line_number=index, line=f"This is working: {line}")
                     self._backtraces.append(dict(event=cloned_event, backtrace=[]))
                     break  # Stop iterating patterns to avoid creating two events for one line of the log

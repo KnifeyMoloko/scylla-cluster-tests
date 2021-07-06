@@ -104,6 +104,8 @@ class NdBenchStatsPublisher(FileFollowerThread):
                         LOGGER.info("NdBench metrics line: {line}".format(line=line))
                         for key, value in match.groupdict().items():
                             operation, name = key.split('_', 1)
+                            LOGGER.info("NdBench operation: {ops}, raw value: {raw} and value {val}"
+                                        .format(ops=key, raw=value, val=float(value)))
                             self.set_metric(operation, name, float(value))
 
                 except Exception:  # pylint: disable=broad-except

@@ -1,4 +1,4 @@
-test_duration: 240
+test_duration: 45
 
 prepare_write_cmd: >-
   ndbench cli.clientName=CassJavaDriverGeneric ; numKeys=20971520 ; numValues=10 ; dataSize=512 ; cass.colsPerRow=10;

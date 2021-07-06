@@ -15,7 +15,7 @@ import re
 import json
 import time
 import logging
-from typing import Type, Optional, List, Tuple
+from typing import Type, Optional, List, Tuple, Any
 
 import dateutil.parser
 from invoke.runners import Result
@@ -131,21 +131,18 @@ NdBenchStressEvent.add_stress_subevents(start=Severity.NORMAL,
                                         failure=Severity.CRITICAL)
 
 
-class NdBenchLogEvent(LogEvent, abstract=True):
-    BuildFailed: Type[LogEventProtocol]
-    Any: Type[LogEventProtocol]
+class NdBenchErrorEvent(LogEvent, abstract=True):
+    Error: Type[LogEventProtocol]
     Failure: Type[LogEventProtocol]
 
 
-NdBenchLogEvent.add_subevent_type("BuildFailed", severity=Severity.ERROR, regex=r"BUILD FAILED")
-NdBenchLogEvent.add_subevent_type("Any", severity=Severity.NORMAL, regex=r".*")
-NdBenchLogEvent.add_subevent_type("Failure", severity=Severity.ERROR,
-                                  regex=r"\sERROR|\sFAILURE|\sFAILED|\sis\scorrupt")
+NdBenchErrorEvent.add_subevent_type("Error", severity=Severity.ERROR, regex=r"\sERROR")
+NdBenchErrorEvent.add_subevent_type("Failure", severity=Severity.CRITICAL, regex=f"\sFAILURE|\sFAILED")
 
 
 NDBENCH_ERROR_EVENTS = (
-    NdBenchLogEvent.BuildFailed(),
-    NdBenchLogEvent.Failure()
+    NdBenchErrorEvent.Failure(),
+    NdBenchErrorEvent.Error()
 )
 
 NDBENCH_ERROR_EVENTS_PATTERNS = [(re.compile(event.regex), event) for event in NDBENCH_ERROR_EVENTS]

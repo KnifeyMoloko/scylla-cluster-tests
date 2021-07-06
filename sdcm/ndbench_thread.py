@@ -101,6 +101,7 @@ class NdBenchStatsPublisher(FileFollowerThread):
                 try:
                     match = stat_regex.search(line)
                     if match:
+                        LOGGER.info("NdBench metrics line: {line}".format(line=line))
                         for key, value in match.groupdict().items():
                             operation, name = key.split('_', 1)
                             self.set_metric(operation, name, float(value))
@@ -140,10 +141,6 @@ class NdBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-many-
         log_file_name = os.path.join(loader.logdir, f'ndbench-l{loader_idx}-c{cpu_idx}-{uuid.uuid4()}.log')
         LOGGER.debug('ndbench local log: %s', log_file_name)
 
-        def raise_event_callback(sentinel, line):  # pylint: disable=unused-argument
-            if line:
-                NdBenchStressEvent.error(node=loader, stress_cmd=self.stress_cmd, errors=[str(line), ]).publish()
-
         LOGGER.debug("running: %s", self.stress_cmd)
 
         if self.stress_num > 1:
@@ -159,14 +156,13 @@ class NdBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-many-
         NdBenchStressEvent.start(node=loader, stress_cmd=self.stress_cmd).publish()
 
         with NdBenchStatsPublisher(loader, loader_idx, ndbench_log_filename=log_file_name), \
-                NdBenchStressEventsPublisher(node=loader, ndbench_log_filename=log_file_name) as events_publisher:
+                NdBenchStressEventsPublisher(node=loader, ndbench_log_filename=log_file_name):
             try:
                 return docker.run(cmd=node_cmd,
                                   timeout=self.timeout + self.shutdown_timeout,
                                   ignore_status=True,
                                   log_file=log_file_name,
-                                  verbose=True,
-                                  watchers=[FailuresWatcher(r'\sERROR|\sFAILURE|\sFAILED|\sis\scorrupt', callback=raise_event_callback, raise_exception=False)])
+                                  verbose=True)
             except Exception as exc:
                 NdBenchStressEvent.failure(node=str(loader),
                                            stress_cmd=self.stress_cmd,

@@ -133,12 +133,10 @@ NdBenchStressEvent.add_stress_subevents(start=Severity.NORMAL,
 
 class NdBenchLogEvent(LogEvent, abstract=True):
     BuildFailed: Type[LogEventProtocol]
-    Any: Type[LogEventProtocol]
     Failure: Type[LogEventProtocol]
 
 
 NdBenchLogEvent.add_subevent_type("BuildFailed", severity=Severity.ERROR, regex=r"BUILD FAILED")
-NdBenchLogEvent.add_subevent_type("Any", severity=Severity.NORMAL, regex=r".*")
 NdBenchLogEvent.add_subevent_type("Failure", severity=Severity.ERROR,
                                   regex=r"\sERROR|\sFAILURE|\sFAILED|\sis\scorrupt")
 

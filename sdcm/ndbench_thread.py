@@ -20,7 +20,7 @@ from distutils.util import strtobool  # pylint: disable=import-error,no-name-in-
 from typing import Any
 
 from sdcm.prometheus import nemesis_metrics_obj
-from sdcm.sct_events.loaders import NdBenchStressEvent, NDBENCH_ERROR_EVENTS_PATTERNS
+from sdcm.sct_events.loaders import NdBenchStressEvent
 from sdcm.utils.common import FileFollowerThread
 from sdcm.remote import FailuresWatcher
 from sdcm.utils.docker_remote import RemoteDocker
@@ -48,14 +48,14 @@ class NdBenchStressEventsPublisher(FileFollowerThread):
                 if self.stopped():
                     break
 
-                for pattern, event in NDBENCH_ERROR_EVENTS_PATTERNS:
-                    if self.event_id:
-                        # Connect the event to the stress load
-                        event.event_id = self.event_id
-
-                    if pattern.search(line):
-                        event.add_info(node=self.node, line=line, line_number=line_number).publish()
-                        break  # Stop iterating patterns to avoid creating two events for one line of the log
+                # for pattern, event in NDBENCH_ERROR_EVENTS_PATTERNS:
+                #     if self.event_id:
+                #         # Connect the event to the stress load
+                #         event.event_id = self.event_id
+                #
+                #     if pattern.search(line):
+                #         event.add_info(node=self.node, line=line, line_number=line_number).publish()
+                #         break  # Stop iterating patterns to avoid creating two events for one line of the log
 
 
 class NdBenchStatsPublisher(FileFollowerThread):
@@ -104,8 +104,6 @@ class NdBenchStatsPublisher(FileFollowerThread):
                         LOGGER.info("NdBench metrics line: {line}".format(line=line))
                         for key, value in match.groupdict().items():
                             operation, name = key.split('_', 1)
-                            LOGGER.info("NdBench operation: {ops}, raw value: {raw} and value {val}"
-                                        .format(ops=key, raw=value, val=float(value)))
                             self.set_metric(operation, name, float(value))
 
                 except Exception:  # pylint: disable=broad-except

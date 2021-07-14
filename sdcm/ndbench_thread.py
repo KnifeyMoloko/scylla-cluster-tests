@@ -16,13 +16,11 @@ import re
 import logging
 import time
 import uuid
-from distutils.util import strtobool  # pylint: disable=import-error,no-name-in-module
 from typing import Any
 
 from sdcm.prometheus import nemesis_metrics_obj
 from sdcm.sct_events.loaders import NdBenchStressEvent
 from sdcm.utils.common import FileFollowerThread
-from sdcm.remote import FailuresWatcher
 from sdcm.utils.docker_remote import RemoteDocker
 from sdcm.stress_thread import format_stress_cmd_error, DockerBasedStressThread
 
@@ -106,22 +104,8 @@ class NdBenchStatsPublisher(FileFollowerThread):
                             operation, name = key.split('_', 1)
                             self.set_metric(operation, name, float(value))
 
-                except Exception:  # pylint: disable=broad-except
-                    LOGGER.exception("fail to send metric")
-
-
-def convert_bool_or_int(value):
-    try:
-        return int(value)
-    except ValueError:
-        pass
-
-    try:
-        return strtobool(value)
-    except ValueError:
-        pass
-
-    return value
+                except Exception as exc:
+                    LOGGER.warning("Failed to send metric. Failed with exception {exc}".format(exc=exc))
 
 
 class NdBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-many-instance-attributes

@@ -134,15 +134,18 @@ NdBenchStressEvent.add_stress_subevents(start=Severity.NORMAL,
 class NdBenchErrorEvent(LogEvent, abstract=True):
     Error: Type[LogEventProtocol]
     Failure: Type[LogEventProtocol]
+    Any: Type[LogEventProtocol]
 
 
 NdBenchErrorEvent.add_subevent_type("Error", severity=Severity.ERROR, regex=r"\sERROR")
 NdBenchErrorEvent.add_subevent_type("Failure", severity=Severity.CRITICAL, regex=f"\sFAILURE|\sFAILED")
+NdBenchErrorEvent.add_subevent_type("Any", severity=Severity.NORMAL, regex=r".*")
 
 
 NDBENCH_ERROR_EVENTS = (
-    NdBenchErrorEvent.Failure(),
-    NdBenchErrorEvent.Error()
+    # NdBenchErrorEvent.Failure(),
+    NdBenchErrorEvent.Error(),
+    NdBenchErrorEvent.Any()
 )
 
 NDBENCH_ERROR_EVENTS_PATTERNS = [(re.compile(event.regex), event) for event in NDBENCH_ERROR_EVENTS]

@@ -1,13 +1,13 @@
-test_duration: 45
+test_duration: 40
 
 prepare_write_cmd: >-
   ndbench cli.clientName=CassJavaDriverGeneric ; numKeys=20971520 ; numValues=10 ; dataSize=512 ; cass.colsPerRow=10;
-  readEnabled=true; numReaders=3; numWriters=3 ; cass.writeConsistencyLevel=LOCAL_QUORUM ; generateChecksum=true;
+  readEnabled=true; numReaders=100; numWriters=100 ; cass.writeConsistencyLevel=LOCAL_QUORUM ; generateChecksum=true;
   cli.timeoutMillis=14400000; writeRateLimit=1350 ; readRateLimit=6000
 
 stress_cmd: >-
   ndbench cli.clientName=CassJavaDriverGeneric ; numKeys=20971520 ; numValues=10 ; dataSize=512 ; cass.colsPerRow=10;
-  readEnabled=true; numReaders=3; numWriters=3 ; cass.writeConsistencyLevel=LOCAL_QUORUM ; generateChecksum=true;
+  readEnabled=true; numReaders=100; numWriters=100 ; cass.writeConsistencyLevel=LOCAL_QUORUM ; generateChecksum=true;
   cli.timeoutMillis=14400000; writeRateLimit=1350 ; readRateLimit=6000
 
 n_db_nodes: 3

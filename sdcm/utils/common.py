@@ -58,9 +58,10 @@ from mypy_boto3_ec2 import EC2Client, EC2ServiceResource
 import docker  # pylint: disable=wrong-import-order; false warning because of docker import (local file vs. package)
 import libcloud.storage.providers
 import libcloud.storage.types
-import yaml
+from libcloud.compute.base import Node
 from libcloud.compute.providers import get_driver
 from libcloud.compute.types import Provider
+import yaml
 from packaging.version import Version
 
 from sdcm.utils.aws_utils import EksClusterCleanupMixin
@@ -713,9 +714,10 @@ def clean_instances_aws(tags_dict, dry_run=False):
                 response = client.terminate_instances(InstanceIds=[instance_id])
                 LOGGER.debug("Done. Result: %s\n", response['TerminatingInstances'])
 
-
 # pylint: disable=too-many-locals,too-many-branches,too-many-statements
-def clean_sct_runners():
+
+
+def clean_sct_runners(test_status: Optional[str] = None, test_runner_ip: str = None):
     LOGGER.info("Looking for SCT runner instances...")
     sct_runners = []
     all_instances = list_instances_aws(verbose=True)
@@ -743,11 +745,10 @@ def clean_sct_runners():
     LOGGER.info("UTC now: %s", utc_now)
     runners_cleaned = []
 
-    def terminate_runner_instance(backend, region, sct_runner):
+    def terminate_runner_instance(aws_client, backend, region, sct_runner):
         if backend == 'aws':
-            client = boto3.client('ec2', region_name=region)
             instance_id = sct_runner['InstanceId']
-            response = client.terminate_instances(InstanceIds=[instance_id])
+            response = aws_client.terminate_instances(InstanceIds=[instance_id])
             LOGGER.debug("Result: %s\n", response['TerminatingInstances'])
         elif backend == 'gce':
             driver = get_gce_service(region)
@@ -762,6 +763,12 @@ def clean_sct_runners():
             region = sct_runner['Placement']['AvailabilityZone'][:-1]
             instance_id = sct_runner['InstanceId']
             launch_time = sct_runner['LaunchTime']
+            aws_client = boto3.client('ec2', region_name=region)
+            LOGGER.info("[%s] %s, launched at %s UTC, keep: %s",
+                        region,
+                        sct_runner["InstanceId"],
+                        tags.get('launch_time'),
+                        tags["keep"])
         else:
             tags = gce_meta_to_dict(sct_runner.extra['metadata'])
             keep = tags.get("keep", "")
@@ -770,9 +777,13 @@ def clean_sct_runners():
             if tags.get("launch_time") is None:
                 LOGGER.warning("Skipping gce instance (%s) without launch_time!", sct_runner.name)
                 continue
+            LOGGER.info("[%s] %s, launched at %s UTC, keep: %s",
+                        region,
+                        sct_runner.id,
+                        tags.get('launch_time'),
+                        tags["keep"])
             launch_time = datetime.datetime.strptime(tags.get("launch_time"), "%B %d, %Y, %H:%M:%S")
             launch_time = launch_time.replace(tzinfo=pytz.utc)
-            LOGGER.info("[%s] %s, launched at %s UTC", region, sct_runner.name, tags.get('launch_time'))
 
         seconds_running = (utc_now - launch_time).total_seconds()
         keep_hours = 0
@@ -787,8 +798,16 @@ def clean_sct_runners():
         if not keep or seconds_running > keep_hours * 3600:
             LOGGER.info("[%s] Runner instance '%s'<keep=%s> that launched at '%s' UTC "
                         "is unused/expired, cleaning ...", region, instance_id, keep, launch_time)
-            terminate_runner_instance(backend, region, sct_runner)
+            terminate_runner_instance(aws_client=aws_client, backend=backend, region=region, sct_runner=sct_runner)
             runners_cleaned.append(sct_runner)
+
+        if test_status == "SUCCESS" and test_runner_ip:
+            LOGGER.info("Removing the sct runner on success...")
+            if backend == "aws" and test_runner_ip == sct_runner["PublicIpAddress"] or \
+                    backend == "gce" and test_runner_ip in sct_runner.public_ips:
+                terminate_runner_instance(aws_client=aws_client, backend=backend, region=region, sct_runner=sct_runner)
+                runners_cleaned.append(sct_runner)
+
     if runners_cleaned:
         LOGGER.info("Cleaned '%s' runners.", len(runners_cleaned))
     else:
@@ -899,7 +918,7 @@ def filter_gce_by_tags(tags_dict, instances):
     return filtered_instances
 
 
-def list_instances_gce(tags_dict=None, running=False, verbose=False):
+def list_instances_gce(tags_dict=None, running=False, verbose=False) -> list[Node]:
     """
     list all instances with specific tags GCE
 

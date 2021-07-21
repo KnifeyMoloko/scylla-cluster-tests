@@ -353,6 +353,19 @@ def call(Map pipelineParams) {
                     }
                 }
             }
+            stage('Clean runner instances on test success') {
+                steps {
+                    catchError(stageResult: 'FAILURE') {
+                        script {
+                            wrap([$class: 'BuildUser']) {
+                                dir('scylla-cluster-tests') {
+                                    cleanSctRunners(params, currentBuild)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         post {
             always {

@@ -200,17 +200,22 @@ def call(Map pipelineParams) {
                                                 """
                                             }
                                             stage('Clean SCT Runners') {
-                                                steps {
-                                                    catchError(stageResult: 'FAILURE') {
-                                                        script {
-                                                            wrap([$class: 'BuildUser']) {
-                                                                dir('scylla-cluster-tests') {
-                                                                    cleanSctRunners(params, currentBuild)
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
+                                                def cloud_provider = getCloudProviderFromBackend(params.backend)
+                                                def test_status = currentBuild.currentResult
+                                                sctScript """
+                                                    echo "Starting to clean runner instances"
+                                                    if [[ "$cloud_provider" == "aws" || "$cloud_provider" == "gce" ]]; then
+                                                        export SCT_RUNNER_IP=\$(cat sct_runner_ip||echo "")
+                                                        if [[ -n "\${SCT_RUNNER_IP}" ]] ; then
+                                                            ./docker/env/hydra.sh clean-runner-instances --test-status "$test_status" --runner-ip \${SCT_RUNNER_IP}
+                                                        else
+                                                            ./docker/env/hydra.sh clean-runner-instances --test-status "$test_status"
+                                                        fi
+                                                    else
+                                                        echo "Not running on AWS or GCP. Skipping cleaning runner instances."
+                                                       fi
+                                                    echo "Finished cleaning runner instances."
+                                                """
                                             }
                                         }
                                     }

@@ -262,7 +262,7 @@ class ClusterTester(db_stats.TestStatsMixin, unittest.TestCase):  # pylint: disa
             self._profile_factory.activate()
 
         ip_ssh_connections = self.params.get(key='ip_ssh_connections')
-        self.log.debug("IP used for SSH connections is '%s'",
+        self.log.info("IP used for SSH connections is '%s'",
                        ip_ssh_connections)
         self.test_config.set_ip_ssh_connections(ip_ssh_connections)
         self._duration = self.params.get(key='test_duration')

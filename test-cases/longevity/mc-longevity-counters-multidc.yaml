@@ -1,0 +1,20 @@
+test_duration: 120
+
+pre_create_keyspace: "CREATE KEYSPACE keyspace1 WITH replication = {'class': 'NetworkTopologyStrategy', 'us-eastscylla_node_east': '2', 'eu-westscylla_node_west': '2'};"
+stress_cmd: ["cassandra-stress write cl=QUORUM duration=20m -schema 'replication(factor=3) compaction(strategy=SizeTieredCompactionStrategy)' -port jmx=6868 -mode cql3 native -rate threads=10 -pop seq=1..10000000 -log interval=5"
+             ]
+
+region_name: 'us-east-1 eu-west-1'
+n_db_nodes: '2 2'
+n_loaders: '1 1'
+n_monitor_nodes: 1
+
+instance_type_db: 'i3.xlarge'
+instance_type_loader: 'c5.4xlarge'
+
+user_prefix: 'mc-longevity-counters-multi-dc'
+space_node_threshold: 64424
+
+ip_ssh_connections: 'ipv6'
+nemesis_class_name: 'NoOpMonkey'
+endpoint_snitch: "Ec2MultiRegionSnitch"

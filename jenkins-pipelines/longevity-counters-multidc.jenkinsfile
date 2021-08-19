@@ -8,6 +8,7 @@ longevityPipeline(
     aws_region: '''["eu-west-1", "us-west-2", "us-east-1"]''',
     test_name: 'longevity_test.LongevityTest.test_custom_time',
     test_config: 'test-cases/longevity/longevity-counters-multidc.yaml',
+    ip_ssh_connections: 'ipv6',
 
     timeout: [time: 550, unit: 'MINUTES']
 )

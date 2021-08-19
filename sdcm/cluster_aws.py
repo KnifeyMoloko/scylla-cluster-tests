@@ -936,6 +936,9 @@ class ScyllaAWSCluster(cluster.BaseScyllaCluster, AWSCluster):
                 broadcast=node.public_ip_address,
             ))
 
+        LOGGER.info("ip_ssh_connections in the params are: %s", self.params.get("ip_ssh_connections"))
+        LOGGER.info("IP_SSH_CONNECTIONS in TestConfig is set to: %s", self.test_config.IP_SSH_CONNECTIONS)
+
         if self.extra_network_interface:
             setup_params.update(dict(
                 seed_address=seed_address,

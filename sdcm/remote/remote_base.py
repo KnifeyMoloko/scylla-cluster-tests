@@ -253,7 +253,9 @@ class RemoteCmdRunnerBase(CommandRunner):  # pylint: disable=too-many-instance-a
 
     @retrying(n=3, sleep_time=5, allowed_exceptions=(RetryableNetworkException,))
     def send_files(self, src: str,  # pylint: disable=too-many-arguments,too-many-statements
-                   dst: str, delete_dst: bool = False, preserve_symlinks: bool = False, verbose: bool = False) -> bool:
+                   dst: str, delete_dst: bool = False,
+                   preserve_symlinks: bool = False,
+                   verbose: bool = False) -> bool:
         """
         Copy files from a local path to the remote host.
 

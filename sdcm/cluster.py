@@ -27,7 +27,8 @@ import uuid
 import itertools
 import json
 import ipaddress
-from typing import List, Optional, Dict, Union, Set, Iterable
+from pathlib import Path
+from typing import List, Optional, Dict, Union, Set, Iterable, TextIO
 from datetime import datetime
 from textwrap import dedent
 from functools import cached_property, wraps
@@ -206,7 +207,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         self._containers = {}
         self.is_seed = False
 
-        self.remoter = None
+        self.remoter: Optional[RemoteCmdRunnerBase] = None
         self.is_scylla_bench_installed = False
 
         self._spot_monitoring_thread = None
@@ -850,7 +851,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         self._db_log_reader_thread.start()
 
     def start_alert_manager_thread(self):
-        self._alert_manager = PrometheusAlertManagerListener(self.external_address, stop_flag=self.termination_event)
+        self._alert_manager = PrometheusAlertManagerListener(self.public_ip_address, stop_flag=self.termination_event)
         self._alert_manager.start()
 
     def silence_alert(self, alert_name, duration=None, start=None, end=None):
@@ -4765,7 +4766,8 @@ class BaseMonitorSet:  # pylint: disable=too-many-public-methods,too-many-instan
     def __init__(self, targets, params):
         self.targets = targets
         self.params = params
-        self.local_metrics_addr = start_metrics_server()  # start prometheus metrics server locally and return local ip
+        # start prometheus metrics server locally and return local ip (ipv6) is set in params as ip_ssh_connections
+        self.local_metrics_addr = start_metrics_server(self.params.get('ip_ssh_connections'))
         self.sct_ip_port = self.set_local_sct_ip()
         self.grafana_port = 3000
         self.monitor_branch = self.params.get('monitor_branch')
@@ -5101,9 +5103,54 @@ class BaseMonitorSet:  # pylint: disable=too-many-public-methods,too-many-instan
             self.configure_scylla_monitoring(node, sct_metrics=sct_metrics, alert_manager=False)
             self.start_scylla_monitoring(node)
 
+    def _get_monitoring_config_yaml(self, port: int, target_file: TextIO):
+        datacenter_pattern = re.compile(r'((?<=Datacenter:\s)[a-z0-9-_]*)')
+        ipv4_pattern = re.compile(r'(?P<ip>(?:[\d]{1,3}\.){3}[\d]{1,3})')
+        ipv6_pattern = re.compile(r'(?P<ip>([0-9a-f]*:){7}([0-9a-f]*))')
+        node = self.targets["db_cluster"].get_node()
+        nodetool_status = node.run_nodetool("status").stdout
+        datacenters = datacenter_pattern.finditer(nodetool_status)
+        dcs = []
+        for datacenter in datacenters:
+            new_dc = {"targets": [],
+                      "labels": {"cluster": "default", "dc": datacenter.group(), "span": datacenter.span()}}
+            dcs.append(new_dc)
+
+        for item in dcs:
+            index = dcs.index(item)
+
+            start_pos = item["labels"]["span"][1]
+            if index == len(dcs) - 1:
+                end_pos = len(nodetool_status)
+            else:
+                end_pos = dcs[index + 1]["labels"]["span"][0]
+            ipsv4_iter = ipv4_pattern.finditer(string=nodetool_status, pos=start_pos, endpos=end_pos)
+            ipsv6_iter = ipv6_pattern.finditer(string=nodetool_status, pos=start_pos, endpos=end_pos)
+            ipsv4 = [f"{item.groupdict()['ip']}:{port}" for item in ipsv4_iter]
+            ipsv6 = [f"{item.groupdict()['ip']}:{port}" for item in ipsv6_iter]
+            ips = ipsv4 or ipsv6
+            item["targets"].extend(ips)
+            item["labels"].pop("span")
+
+        return yaml.safe_dump(dcs, target_file, default_flow_style=False, sort_keys=False)
+
+    def _prepare_monitoring_config_files_local(self):
+        tmp_scylla_servers = Path("/tmp/") / "scylla_servers.yml"
+        tmp_node_exporters = Path("/tmp/") / "node_exporter_servers.yml"
+        tmp_scylla_servers.touch(mode=0o755)
+        tmp_node_exporters.touch(mode=0o755)
+        with tmp_scylla_servers.open(mode="w") as scylla_servers:
+            self._get_monitoring_config_yaml(port=9180, target_file=scylla_servers)
+
+        with tmp_node_exporters.open(mode="w") as node_exporters:
+            self._get_monitoring_config_yaml(port=9100, target_file=node_exporters)
+
+        return [tmp_scylla_servers, tmp_node_exporters]
+
     @retrying(n=5, sleep_time=10, allowed_exceptions=(Failure, UnexpectedExit),
               message="Waiting for reconfiguring scylla monitoring")
     def reconfigure_scylla_monitoring(self):
+        tmp_config_files = self._prepare_monitoring_config_files_local()
         for node in self.nodes:
             cluster_backend = self.params.get("cluster_backend")
             monitoring_targets = []
@@ -5112,12 +5159,18 @@ class BaseMonitorSet:  # pylint: disable=too-many-public-methods,too-many-instan
             monitoring_targets = " ".join(monitoring_targets)
             if self.params.get("ip_ssh_connections") != "ipv6":
                 monitoring_targets = monitoring_targets.replace("[", "").replace("]", "")
+
             node.remoter.sudo(shell_script_cmd(f"""\
                 cd {self.monitor_install_path}
-                mkdir -p {self.monitoring_conf_dir}
+                mkdir -m 777 -p {self.monitoring_conf_dir}
                 export PATH=/usr/local/bin:$PATH  # hack to enable running on docker
-                python3 genconfig.py -s -n -d {self.monitoring_conf_dir} {monitoring_targets}
             """), verbose=True)
+            for tmp_file in tmp_config_files:
+                node.remoter: RemoteCmdRunnerBase
+                LOGGER.info("Name of the temp file: %s", tmp_file.name)
+                LOGGER.info("Monitoring conf directory: %s", self.monitoring_conf_dir)
+                node.remoter.send_files(src=str(tmp_file.absolute()), dst=f"/tmp/{tmp_file.name}")
+                node.remoter.sudo(cmd=f"cp /tmp/{tmp_file.name} {self.monitoring_conf_dir}/{tmp_file.name}")
 
             if cluster_backend != "docker":
                 node.remoter.sudo(f"docker run --rm -v {self.monitoring_conf_dir}:/workdir"

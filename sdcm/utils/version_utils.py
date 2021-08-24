@@ -129,6 +129,7 @@ def get_scylla_urls_from_repository(repo_details):
                 continue
             full_url = url_format.format(**{**url_details, 'arch': arch})
             # for scylla-manager we never used a noarch key
+            LOGGER.info("This is the full repo url: %s", full_url)
             basearch_list = ["x86_64"] if 'scylla-manager' in full_url else ["x86_64", "noarch"]
             for basearch in basearch_list:
                 urls.add(Template(full_url).substitute(basearch=basearch, releasever='7'))

@@ -41,29 +41,41 @@ class _ThreadingSimpleServer(ThreadingMixIn, HTTPServer):
     """Thread per request HTTP server."""
 
 
-def start_http_server(port, addr='', registry=prometheus_client.REGISTRY):
+class _ThreadingIPv6Server(ThreadingMixIn, HTTPServer):
+    address_family = socket.AF_INET6
+
+
+def start_http_server(port, addr='', registry=prometheus_client.REGISTRY, ipv6: bool = False):
     """Starts an HTTP server for prometheus metrics as a daemon thread"""
+    server = _ThreadingIPv6Server if ipv6 else _ThreadingSimpleServer
     custom_metrics_handler = prometheus_client.MetricsHandler.factory(registry)
-    httpd = _ThreadingSimpleServer((addr, port), custom_metrics_handler)
+    httpd = server((addr, port), custom_metrics_handler)
     http_thread = threading.Thread(target=httpd.serve_forever, name='HttpServerThread', daemon=True)
     http_thread.start()
     return httpd
 
 
-def start_metrics_server():
+def start_metrics_server(ip_ssh_connections: str):
     """
     https://github.com/prometheus/prometheus/wiki/Default-port-allocations
     Occupied port 9389 for SCT
     """
+    ipv6 = True if ip_ssh_connections == "ipv6" else False
     hostname = socket.gethostname()
 
     try:
         LOGGER.debug('Try to start prometheus API server')
         httpd = start_http_server(0)
+        # httpd = start_http_server(0, ipv6=ipv6)
         port = httpd.server_port
-        ip = socket.gethostbyname(hostname)
 
-        LOGGER.info('prometheus API server running on port: %s', port)
+        # if ipv6:
+        #     ip = socket.getaddrinfo(host=hostname, port=port, family=socket.AF_INET6)[0][4][0]
+        # else:
+        #     ip = socket.gethostbyname(hostname)
+        ip = socket.gethostname()
+
+        LOGGER.info('prometheus API server running on address: %s, port: %s', ip, port)
         return '{}:{}'.format(ip, port)
     except Exception as ex:  # pylint: disable=broad-except
         LOGGER.error('Cannot start local http metrics server: %s', ex)

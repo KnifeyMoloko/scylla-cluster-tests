@@ -27,7 +27,7 @@ import uuid
 import itertools
 import json
 import ipaddress
-from typing import List, Optional, Dict, Union, Set, Iterable
+from typing import List, Optional, Dict, Union, Set, Iterable, Any
 from datetime import datetime
 from textwrap import dedent
 from functools import cached_property, wraps
@@ -206,7 +206,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         self._containers = {}
         self.is_seed = False
 
-        self.remoter = None
+        self.remoter: Optional[RemoteCmdRunnerBase] = None
         self.is_scylla_bench_installed = False
 
         self._spot_monitoring_thread = None
@@ -1562,7 +1562,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
     def remote_cassandra_rackdc_properties(self):
         return self._remote_properties(path=self.add_install_prefix(abs_path=SCYLLA_PROPERTIES_PATH))
 
-    def remote_scylla_yaml(self):
+    def remote_scylla_yaml(self) -> dict[str, Any]:
         return self._remote_yaml(path=self.add_install_prefix(abs_path=SCYLLA_YAML_PATH))
 
     def remote_manager_yaml(self):

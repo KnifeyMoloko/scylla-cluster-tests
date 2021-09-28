@@ -5407,7 +5407,7 @@
                 "repeatIteration": null,
                 "repeatRowId": null,
                 "showTitle": false,
-                "title": "NdBench metrics",
+                "title": "NoSQLBench metrics",
                 "titleSize": "h6"
             },
             {

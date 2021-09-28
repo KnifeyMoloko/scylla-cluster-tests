@@ -323,6 +323,8 @@ def get_pattern_to_event_to_func_mapping(node: str) \
                            .format(event_count=len(begun_events),
                                    event_type=event_type,
                                    event_period=EventPeriod.BEGIN.value))
+            for event in begun_events:
+                LOGGER.info(f"Found duplicate event: {event}")
         event = begun_events[-1]
         event.end_event()
 

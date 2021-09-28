@@ -1336,11 +1336,11 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
                                             start_from_beginning: bool = False,
                                             exclude_from_logging: List[str] = None) -> None:
         """Search for all known patterns listed in `sdcm.sct_events.database.SYSTEM_ERROR_EVENTS'."""
-
         # pylint: disable=too-many-branches,too-many-locals,too-many-statements
 
         backtraces = []
         index = 0
+        line_number_presented = []
 
         if not os.path.exists(self.system_log):
             return
@@ -1403,6 +1403,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
                     for item in db_event_pattern_func_map:
                         event_match = item.pattern.search(line)
                         if event_match:
+                            LOGGER.info(f"Found matching line for index {index}, line: {line}")
                             item.period_func(match=event_match)
 
                     # for each line use all regexes to match, and if found send an event

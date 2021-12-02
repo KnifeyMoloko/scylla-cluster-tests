@@ -5957,7 +5957,7 @@
         "timeFrom": null,
         "timeRegions": [],
         "timeShift": null,
-        "title": "Write ops / minute",
+        "title": "Write ops/sec 1-minute rate",
         "tooltip": {
           "msResolution": false,
           "shared": true,
@@ -6065,7 +6065,7 @@
         "timeFrom": null,
         "timeRegions": [],
         "timeShift": null,
-        "title": "Read ops / minute",
+        "title": "Read ops/sec 1-minute rate",
         "tooltip": {
           "msResolution": false,
           "shared": true,
@@ -6173,7 +6173,7 @@
         "timeFrom": null,
         "timeRegions": [],
         "timeShift": null,
-        "title": "Ops vs successful ops / minute",
+        "title": "Ops vs successful ops/sec 1-minute average",
         "tooltip": {
           "msResolution": false,
           "shared": true,

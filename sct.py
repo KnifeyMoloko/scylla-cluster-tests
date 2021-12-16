@@ -1095,7 +1095,12 @@ def send_email(test_id=None, test_status=None, start_time=None, started_by=None,
                 })
         test_results['logs_links'] = list_logs_by_test_id(test_results.get('test_id', test_id))
 
-        reporter = build_reporter(reporter, email_recipients, testrun_dir)
+        try:
+            reporter = build_reporter(reporter, email_recipients, testrun_dir)
+        except Exception as exc:
+            LOGGER.warning(exc)
+            raise
+
         if not reporter:
             LOGGER.warning("No reporter found")
             sys.exit(1)

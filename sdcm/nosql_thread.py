@@ -56,6 +56,7 @@ class NoSQLBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-ma
 
     GRAPHITE_EXPORTER_CONFIG_SRC_PATH = "docker/graphite-exporter/graphite_mapping.conf"
     GRAPHITE_EXPORTER_CONFIG_DST_PATH = "/tmp/"
+    NOSQLBENCH_METRICS_SRC_PATH = "/tmp/nosql_metrics"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -79,11 +80,14 @@ class NoSQLBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-ma
     def _run_stress(self, loader, loader_idx, cpu_idx):
         stress_cmd = self.build_stress_cmd(loader_idx=loader_idx)
 
-        if not os.path.exists(loader.logdir):
-            os.makedirs(loader.logdir, exist_ok=True)
+        os.makedirs(loader.logdir, exist_ok=True)
+        os.makedirs(self.NOSQLBENCH_METRICS_SRC_PATH, exist_ok=True)
+
         log_file_name = os.path.join(loader.logdir, 'nosql-bench-l%s-c%s-%s.log' %
                                      (loader_idx, cpu_idx, uuid.uuid4()))
-        LOGGER.debug('nosql-bench-stress local log: %s', log_file_name)
+        summary_file_name = f"nosql-bench-l{loader_idx}-c{cpu_idx}-{uuid.uuid4()}.summary"
+        summary_file_path = os.path.join(self.NOSQLBENCH_METRICS_SRC_PATH, summary_file_name)
+        LOGGER.info('nosql-bench-stress local log path: %s', log_file_name)
         LOGGER.debug("'running: %s", stress_cmd)
         with NoSQLBenchStressEvent(node=loader, stress_cmd=stress_cmd, log_file_name=log_file_name) as stress_event, \
                 NoSQLBenchEventsPublisher(node=loader, log_filename=log_file_name):
@@ -109,9 +113,15 @@ class NoSQLBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-ma
                 return loader.remoter.run(cmd=f'docker run '
                                               '--name=nb '
                                               '--network=nosql '
+                                              f'-v {self.NOSQLBENCH_METRICS_SRC_PATH}:'
+                                              f'{self.NOSQLBENCH_METRICS_SRC_PATH} '
                                               f'{self._nosqlbench_image} '
-                                              f'{stress_cmd} --report-graphite-to graphite-exporter:9109',
-                                          timeout=self.timeout + self.shutdown_timeout, log_file=log_file_name)
+                                              f'{stress_cmd} '
+                                              f'--classic-histograms hdr '
+                                              f'--report-graphite-to graphite-exporter:9109 '
+                                              f'--report-summary-to {summary_file_path} ',
+                                          timeout=self.timeout + self.shutdown_timeout,
+                                          log_file=log_file_name)
             except Exception as exc:  # pylint: disable=broad-except
                 stress_event.severity = Severity.CRITICAL if self.stop_test_on_failure else Severity.ERROR
                 stress_event.add_error(errors=[format_stress_cmd_error(exc)])

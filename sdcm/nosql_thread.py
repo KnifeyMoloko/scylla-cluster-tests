@@ -16,6 +16,7 @@ import logging
 import time
 import uuid
 import threading
+from pathlib import Path
 
 from sdcm.cluster import BaseNode
 from sdcm.sct_events import Severity
@@ -110,18 +111,26 @@ class NoSQLBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-ma
                                    log_file=log_file_name,
                                    ignore_status=True)
 
-                return loader.remoter.run(cmd=f'docker run '
-                                              '--name=nb '
-                                              '--network=nosql '
-                                              f'-v {self.NOSQLBENCH_METRICS_SRC_PATH}:'
-                                              f'{self.NOSQLBENCH_METRICS_SRC_PATH} '
-                                              f'{self._nosqlbench_image} '
-                                              f'{stress_cmd} '
-                                              f'--classic-histograms hdr '
-                                              f'--report-graphite-to graphite-exporter:9109 '
-                                              f'--report-summary-to {summary_file_path} ',
-                                          timeout=self.timeout + self.shutdown_timeout,
-                                          log_file=log_file_name)
+                loader.remoter.run(cmd=f'docker run '
+                                       '--name=nb '
+                                       '--network=nosql '
+                                       f'-v {self.NOSQLBENCH_METRICS_SRC_PATH}:'
+                                       f'{self.NOSQLBENCH_METRICS_SRC_PATH} '
+                                       f'{self._nosqlbench_image} '
+                                       f'{stress_cmd} '
+                                       f'--classic-histograms hdr '
+                                       f'--report-graphite-to graphite-exporter:9109 '
+                                       f'--report-summary-to {summary_file_path} ',
+                                   timeout=self.timeout + self.shutdown_timeout,
+                                   log_file=log_file_name)
+
+                loader.remoter.receive_files(src=summary_file_path, dst=loader.logdir)
+
+                received_file_path = Path(loader.logdir) / summary_file_name
+
+                with received_file_path.open(mode="r") as summary_read:
+                    LOGGER.info("Contents of the summary file on the runner:\n%s\n", summary_read.read())
+
             except Exception as exc:  # pylint: disable=broad-except
                 stress_event.severity = Severity.CRITICAL if self.stop_test_on_failure else Severity.ERROR
                 stress_event.add_error(errors=[format_stress_cmd_error(exc)])

@@ -64,6 +64,8 @@ class BaseResultsAnalyzer:  # pylint: disable=too-many-instance-attributes
         :param test_id: test id created by performance test
         :return: test results in json format
         """
+        LOGGER.info("Arguments in get_test_by_id() in BaseResultsAnalyzer:\n%s",
+                    {"index": self._es_index, "doc_type": self._es_doc_type, "id": test_id})
         if not self._es.exists(index=self._es_index, doc_type=self._es_doc_type, id=test_id):
             self.log.error('Test results not found: {}'.format(test_id))
             return None

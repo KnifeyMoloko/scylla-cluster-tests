@@ -554,7 +554,8 @@ class TestStatsMixin(Stats):
         return test_details
 
     def create_test_stats(self, sub_type=None, specific_tested_stats=None,  # pylint: disable=too-many-arguments
-                          doc_id_with_timestamp=False, append_sub_test_to_name=True, test_name=None, test_index=None):
+                          doc_id_with_timestamp=False, append_sub_test_to_name=True, test_name=None, test_index=None,
+                          include_setup_details: bool = True):
 
         if not self.create_stats:
             return
@@ -564,7 +565,8 @@ class TestStatsMixin(Stats):
             self._test_index = test_index
         self._test_id = self._create_test_id(doc_id_with_timestamp)
         self._stats = self._init_stats()
-        self._stats['setup_details'] = self.get_setup_details()
+        if include_setup_details:
+            self._stats['setup_details'] = self.get_setup_details()
         self._stats['versions'] = self.get_scylla_versions()
         self._stats['test_details'] = self.get_test_details()
         test_name = test_name if test_name else self.id()
@@ -593,7 +595,7 @@ class TestStatsMixin(Stats):
             cmd_params = get_stress_harry_cmd_params(cmd)
         elif stresser == 'ycsb':
             cmd_params = get_ycsb_cmd_params(cmd)
-        elif stresser in ['gemini', 'ndbench']:
+        elif stresser in ['gemini', 'ndbench', 'nosqlbench']:
             cmd_params = get_raw_cmd_params(cmd)
         elif stresser == 'gemini':
             cmd_params = get_gemini_cmd_params(cmd)

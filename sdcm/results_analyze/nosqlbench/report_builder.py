@@ -52,6 +52,8 @@ class NoSQLBenchReportBuilder(metaclass=Singleton):
                                    if any(k.startswith(name) for name in abridged_timers)}.items()))
         }
 
+        LOGGER.info("Abridged report:\n%s", self._abridged_report)
+
     def build_all_reports(self):
         self.build_abridged_report()
 

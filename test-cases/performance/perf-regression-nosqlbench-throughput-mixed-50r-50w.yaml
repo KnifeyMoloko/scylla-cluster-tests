@@ -4,4 +4,4 @@ n_db_nodes: 2
 n_loaders: 1
 n_monitor_nodes: 1
 space_node_threshold: 64424
-store_perf_results: false
+store_perf_results: true

@@ -5957,7 +5957,7 @@
         "timeFrom": null,
         "timeRegions": [],
         "timeShift": null,
-        "title": "Write ops/sec 1-minute rate",
+        "title": "Write ops / minute",
         "tooltip": {
           "msResolution": false,
           "shared": true,

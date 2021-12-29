@@ -11,17 +11,16 @@
 #
 # Copyright (c) 2021 ScyllaDB
 
-import os
 import logging
+import os
+import threading
 import time
 import uuid
-import threading
-from pathlib import Path
 
 from sdcm.cluster import BaseNode
 from sdcm.sct_events import Severity
-from sdcm.stress_thread import format_stress_cmd_error, DockerBasedStressThread
 from sdcm.sct_events.loaders import NoSQLBenchStressEvent, NOSQLBENCH_EVENT_PATTERNS
+from sdcm.stress_thread import format_stress_cmd_error, DockerBasedStressThread
 from sdcm.utils.common import FileFollowerThread
 
 LOGGER = logging.getLogger(__name__)
@@ -125,11 +124,6 @@ class NoSQLBenchStressThread(DockerBasedStressThread):  # pylint: disable=too-ma
                                    log_file=log_file_name)
 
                 loader.remoter.receive_files(src=summary_file_path, dst=loader.logdir)
-
-                received_file_path = Path(loader.logdir) / summary_file_name
-
-                with received_file_path.open(mode="r") as summary_read:
-                    LOGGER.info("Contents of the summary file on the runner:\n%s\n", summary_read.read())
 
             except Exception as exc:  # pylint: disable=broad-except
                 stress_event.severity = Severity.CRITICAL if self.stop_test_on_failure else Severity.ERROR

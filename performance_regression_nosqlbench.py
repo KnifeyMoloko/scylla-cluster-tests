@@ -21,51 +21,49 @@ class PerformanceRegressionNosqlBenchTest(PerformanceRegressionTest):
         Run a performance workload with NoSQLBench. The specifics of the
         workload should be defined in the respective test case yaml file.
         """
-        include_setup_details = False
         stress_cmd = self.params.get("stress_cmd")
         self.create_test_stats(sub_type='mixed',
-                               doc_id_with_timestamp=False,
-                               include_setup_details=include_setup_details)
+                               doc_id_with_timestamp=False)
         stress_queue = self.run_stress_thread(stress_cmd=stress_cmd, stress_num=1, stats_aggregate_cmds=False)
-        results = self.get_stress_results(queue=stress_queue)
+        results = self.get_stress_results(queue=stress_queue, calculate_stats=False)
         LOGGER.info("Raw nosqlbench run result: %s", results)
-        self._update_test_details(include_setup_details=include_setup_details)
+        self._update_test_details(include_setup_details=True)
         report_builder = self._get_report_builder()
         self._display_results(report_builder)
         report_builder.build_all_reports()
         self._update_stats_with_nosqlbench_report(report_builder)
         report_builder.save_abridged_report_to_file()
         report_builder.print_raw_report_file()
-        # self.get_prometheus_stats()
         self._check_regression()
 
-    # def create(self) -> None:
-    #     LOGGER.info("Overwritten create method called for stats!")
-    #     body = self._stats.copy()
-    #     trimmed_setup_details = {
-    #         "ami_id_db_scylla": body["setup_details"]["ami_id_db_scylla"],
-    #         "append_scylla_args": body["setup_details"]["append_scylla_args"],
-    #         "cluster_backend": body["setup_details"]["cluster_backend"],
-    #         "instance_type_db": body["setup_details"]["instance_type_db"],
-    #         "instance_type_loader": body["setup_details"]["instance_type_loader"],
-    #         "instance_type_monitor": body["setup_details"]["instance_type_monitor"],
-    #         "region_name": body["setup_details"]["region_name"],
-    #     }
-    #     body["setup_details"] = trimmed_setup_details
-    #
-    #     if not self.elasticsearch:
-    #         LOGGER.error("Failed to create test stats: ES connection is not created (doc_id=%s)", self.test_id)
-    #         return
-    #     try:
-    #         self.elasticsearch.create_doc(
-    #             index=self._test_index,
-    #             doc_type=self._es_doc_type,
-    #             doc_id=self._test_id,
-    #             body=body,
-    #         )
-    #     except Exception as exc:  # pylint: disable=broad-except
-    #         LOGGER.exception("Failed to create test stats (doc_id=%s)", self._test_id)
-    #         ElasticsearchEvent(doc_id=self._test_id, error=str(exc)).publish()
+    def create(self) -> None:
+        LOGGER.info("Overwritten create method called for stats!")
+        body = self._stats.copy()
+        LOGGER.info("Setup details contents:\n%s", body)
+        trimmed_setup_details = {
+            "ami_id_db_scylla": body["setup_details"]["ami_id_db_scylla"],
+            "append_scylla_args": body["setup_details"]["append_scylla_args"],
+            "cluster_backend": body["setup_details"]["cluster_backend"],
+            "instance_type_db": body["setup_details"]["instance_type_db"],
+            "instance_type_loader": body["setup_details"]["instance_type_loader"],
+            "instance_type_monitor": body["setup_details"]["instance_type_monitor"],
+            "region_name": body["setup_details"]["region_name"],
+        }
+        body["setup_details"] = trimmed_setup_details
+
+        if not self.elasticsearch:
+            LOGGER.error("Failed to create test stats: ES connection is not created (doc_id=%s)", self.test_id)
+            return
+        try:
+            self.elasticsearch.create_doc(
+                index=self._test_index,
+                doc_type=self._es_doc_type,
+                doc_id=self._test_id,
+                body=body,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            LOGGER.exception("Failed to create test stats (doc_id=%s)", self._test_id)
+            ElasticsearchEvent(doc_id=self._test_id, error=str(exc)).publish()
 
     def _check_regression(self):
         analyzer_args = NoSQLBenchAnalyzerArgs(

@@ -155,16 +155,19 @@ class ScyllaClusterBenchmarkManager(metaclass=Singleton):
                     cassandra_fio_read_bw=runner.benchmark_results["cassandra_fio_lcs_64k_read"]["read"]["bw"],
                     cassandra_fio_write_bw=runner.benchmark_results["cassandra_fio_lcs_64k_write"]["write"]["bw"]
                 )
-                averages = self._get_average_results(es_docs=self._get_all_benchmark_results(),
-                                                     instance_type=runner.node_instance_type,
-                                                     test_id=TestConfig().test_id())
-                self._comparison.update(
-                    self._check_results(node_name=runner.node_name,
-                                        averages=averages,
-                                        result=result,
-                                        margins=Margins(sysbench_eps=0.03,
-                                                        cassandra_fio_read_bw=0.01,
-                                                        cassandra_fio_write_bw=0.01)))
+                try:
+                    averages = self._get_average_results(es_docs=self._get_all_benchmark_results(),
+                                                         instance_type=runner.node_instance_type,
+                                                         test_id=TestConfig().test_id())
+                    self._comparison.update(
+                        self._check_results(node_name=runner.node_name,
+                                            averages=averages,
+                                            result=result,
+                                            margins=Margins(sysbench_eps=0.03,
+                                                            cassandra_fio_read_bw=0.01,
+                                                            cassandra_fio_write_bw=0.01)))
+                except KeyError as kexc:
+                    LOGGER.warning("Unable to compare benchmark results.\n Ran into exception: %s", kexc)
 
     @staticmethod
     def _check_results(node_name: str, averages: Averages, result: ComparableResult, margins: Margins) -> dict:
@@ -247,6 +250,7 @@ class ScyllaNodeBenchmarkRunner:
         package_list = ["make", "automake", "libtool", "pkg-config", "libaio-dev", "fio"]
         try:
             LOGGER.info("Installing Ubuntu prerequisites for the node benchmarks...")
+            self._node.update_repo_cache()
             for pkg in package_list:
                 self._node.install_package(pkg, wait_for_package_manager=False)
             LOGGER.info("Ubuntu prerequisites for the node benchmarks installed.")

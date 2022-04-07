@@ -15,6 +15,7 @@
 import logging
 import re
 from functools import partial
+from typing import Callable
 
 from sdcm.cluster import BaseNode
 from sdcm.nemesis import StartStopMajorCompaction, StartStopScrubCompaction, StartStopCleanupCompaction, \
@@ -23,13 +24,13 @@ from sdcm.rest.compaction_manager_client import CompactionManagerClient
 from sdcm.rest.storage_service_client import StorageServiceClient
 from sdcm.tester import ClusterTester
 from sdcm.utils.common import ParallelObject
-from sdcm.utils.compaction_ops import CompactionOps
-
+from sdcm.utils.compaction_ops import CompactionOps, CompactionTypes
 LOGGER = logging.getLogger(__name__)
 
 
 class StopCompactionTest(ClusterTester):
     GREP_PATTERN = r"Compaction for ([\w/\d]+) was stopped"
+    COMPACTION_TYPES = CompactionTypes()
 
     def setUp(self):
         super().setUp()
@@ -63,6 +64,31 @@ class StopCompactionTest(ClusterTester):
 
         with self.subTest("Stop reshape on boot compaction test"):
             self.stop_reshape_compaction(reshape_on_boot=True)
+
+    def test_stop_compaction_ks_cf(self):
+        with self.subTest("Stop SCRUB compaction on c-s keyspace and cf"):
+            compaction_ops = CompactionOps(cluster=self.db_cluster, node=self.node)
+            self._stop_compaction_on_ks_cf_base_scenario(
+                compaction_func=compaction_ops.trigger_scrub_compaction,
+                watcher_expression="Scrubbing in abort mode",
+                compaction_type=self.COMPACTION_TYPES.SCRUB
+            )
+
+        with self.subTest("Stop CLEANUP compaction on c-s keyspace and cf"):
+            compaction_ops = CompactionOps(cluster=self.db_cluster, node=self.node)
+            self._stop_compaction_on_ks_cf_base_scenario(
+                compaction_func=compaction_ops.trigger_cleanup_compaction,
+                watcher_expression="Cleaning",
+                compaction_type=self.COMPACTION_TYPES.CLEANUP
+            )
+
+        with self.subTest("Stop VALIDATE compaction on c-s keyspace and cf"):
+            compaction_ops = CompactionOps(cluster=self.db_cluster, node=self.node)
+            self._stop_compaction_on_ks_cf_base_scenario(
+                compaction_func=compaction_ops.trigger_validation_compaction,
+                watcher_expression="Scrubbing in validate mode",
+                compaction_type=self.COMPACTION_TYPES.SCRUB
+            )
 
     def stop_major_compaction(self):
         """
@@ -260,6 +286,30 @@ class StopCompactionTest(ClusterTester):
 
         self.assertTrue(found_grepped_expression, msg=f'Did not find the expected "{self.GREP_PATTERN}" '
                                                       f'expression in the logs.')
+
+    def _stop_compaction_on_ks_cf_base_scenario(self,
+                                                compaction_func: Callable,
+                                                watcher_expression: str,
+                                                compaction_type: str):
+        c_s_keyspace = "keyspace1"
+        c_s_cf = "standard1"
+        LOGGER.info("Running a start / stop compaction test for compaction type: %s", compaction_type)
+        self.wait_no_compactions_running()
+        compaction_ops = CompactionOps(cluster=self.db_cluster, node=self.node)
+        compaction_manager_client = CompactionManagerClient(self.node)
+        stop_func = partial(compaction_manager_client.stop_keyspace_compaction,
+                            keyspace=c_s_keyspace, compaction_type=compaction_type,
+                            tables=[c_s_cf])
+        timeout = 360
+        trigger_func = partial(compaction_func)
+        watch_func = partial(compaction_ops.stop_on_user_compaction_logged,
+                             node=self.node,
+                             watch_for=watcher_expression,
+                             timeout=timeout,
+                             stop_func=stop_func)
+
+        ParallelObject(objects=[trigger_func, watch_func], timeout=timeout).call_objects()
+        self._grep_log_and_assert(self.node)
 
 
 class StopCompactionTestICS(ClusterTester):

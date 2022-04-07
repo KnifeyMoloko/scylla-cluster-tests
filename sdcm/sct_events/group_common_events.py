@@ -174,3 +174,13 @@ def ignore_scrub_invalid_errors():
             line="Skipping invalid partition",
         ))
         yield
+
+
+@contextmanager
+def ignore_compaction_stopped_exceptions():
+    with ExitStack() as stack:
+        stack.enter_context(DbEventsFilter(
+            db_event=DatabaseLogEvent.DATABASE_ERROR,
+            line="was stopped due to: user request"
+        ))
+        yield

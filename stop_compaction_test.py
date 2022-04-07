@@ -14,6 +14,7 @@
 # Copyright (c) 2021 ScyllaDB
 import logging
 import re
+from contextlib import contextmanager
 from functools import partial
 from typing import Callable
 
@@ -22,6 +23,7 @@ from sdcm.nemesis import StartStopMajorCompaction, StartStopScrubCompaction, Sta
     StartStopValidationCompaction
 from sdcm.rest.compaction_manager_client import CompactionManagerClient
 from sdcm.rest.storage_service_client import StorageServiceClient
+from sdcm.sct_events.group_common_events import ignore_compaction_stopped_exceptions
 from sdcm.tester import ClusterTester
 from sdcm.utils.common import ParallelObject
 from sdcm.utils.compaction_ops import CompactionOps, CompactionTypes
@@ -44,51 +46,54 @@ class StopCompactionTest(ClusterTester):
         compaction_ops.disable_autocompaction_on_ks_cf(node=self.node)
 
     def test_stop_compaction(self):
-        with self.subTest("Stop upgrade compaction test"):
-            self.stop_upgrade_compaction()
+        with self.run_alongside_cs_stress():
+            with self.subTest("Stop upgrade compaction test"):
+                self.stop_upgrade_compaction()
 
-        with self.subTest("Stop major compaction test"):
-            self.stop_major_compaction()
+            with self.subTest("Stop major compaction test"):
+                self.stop_major_compaction()
 
-        with self.subTest("Stop scrub compaction test"):
-            self.stop_scrub_compaction()
+            with self.subTest("Stop scrub compaction test"):
+                self.stop_scrub_compaction()
 
-        with self.subTest("Stop cleanup compaction test"):
-            self.stop_cleanup_compaction()
+            with self.subTest("Stop cleanup compaction test"):
+                self.stop_cleanup_compaction()
 
-        with self.subTest("Stop validation compaction test"):
-            self.stop_validation_compaction()
+            with self.subTest("Stop validation compaction test"):
+                self.stop_validation_compaction()
 
-        with self.subTest("Stop reshape compaction test"):
-            self.stop_reshape_compaction()
+            with self.subTest("Stop reshape compaction test"):
+                self.stop_reshape_compaction()
 
         with self.subTest("Stop reshape on boot compaction test"):
             self.stop_reshape_compaction(reshape_on_boot=True)
 
     def test_stop_compaction_ks_cf(self):
-        with self.subTest("Stop SCRUB compaction on c-s keyspace and cf"):
-            compaction_ops = CompactionOps(cluster=self.db_cluster, node=self.node)
-            self._stop_compaction_on_ks_cf_base_scenario(
-                compaction_func=compaction_ops.trigger_scrub_compaction,
-                watcher_expression="Scrubbing in abort mode",
-                compaction_type=self.COMPACTION_TYPES.SCRUB
-            )
+        with ignore_compaction_stopped_exceptions():
+            with self.run_alongside_cs_stress():
+                with self.subTest("Stop SCRUB compaction on c-s keyspace and cf"):
+                    compaction_ops = CompactionOps(cluster=self.db_cluster, node=self.node)
+                    self._stop_compaction_on_ks_cf_base_scenario(
+                        compaction_func=compaction_ops.trigger_scrub_compaction,
+                        watcher_expression="Scrubbing in abort mode",
+                        compaction_type=self.COMPACTION_TYPES.SCRUB
+                    )
 
-        with self.subTest("Stop CLEANUP compaction on c-s keyspace and cf"):
-            compaction_ops = CompactionOps(cluster=self.db_cluster, node=self.node)
-            self._stop_compaction_on_ks_cf_base_scenario(
-                compaction_func=compaction_ops.trigger_cleanup_compaction,
-                watcher_expression="Cleaning",
-                compaction_type=self.COMPACTION_TYPES.CLEANUP
-            )
+                with self.subTest("Stop CLEANUP compaction on c-s keyspace and cf"):
+                    compaction_ops = CompactionOps(cluster=self.db_cluster, node=self.node)
+                    self._stop_compaction_on_ks_cf_base_scenario(
+                        compaction_func=compaction_ops.trigger_cleanup_compaction,
+                        watcher_expression="Cleaning",
+                        compaction_type=self.COMPACTION_TYPES.CLEANUP
+                    )
 
-        with self.subTest("Stop VALIDATE compaction on c-s keyspace and cf"):
-            compaction_ops = CompactionOps(cluster=self.db_cluster, node=self.node)
-            self._stop_compaction_on_ks_cf_base_scenario(
-                compaction_func=compaction_ops.trigger_validation_compaction,
-                watcher_expression="Scrubbing in validate mode",
-                compaction_type=self.COMPACTION_TYPES.SCRUB
-            )
+                with self.subTest("Stop VALIDATE compaction on c-s keyspace and cf"):
+                    compaction_ops = CompactionOps(cluster=self.db_cluster, node=self.node)
+                    self._stop_compaction_on_ks_cf_base_scenario(
+                        compaction_func=compaction_ops.trigger_validation_compaction,
+                        watcher_expression="Scrubbing in validate mode",
+                        compaction_type=self.COMPACTION_TYPES.SCRUB
+                    )
 
     def stop_major_compaction(self):
         """
@@ -265,6 +270,24 @@ class StopCompactionTest(ClusterTester):
             ParallelObject(objects=[trigger_func, watch_func], timeout=timeout).call_objects()
         finally:
             self._grep_log_and_assert(node)
+
+    @contextmanager
+    def run_alongside_cs_stress(self):
+        stress_cmds = self.params.get('stress_cmd')
+        try:
+            LOGGER.info("Running stress commands...")
+            read_thread = self.run_stress_thread(
+                stress_cmd=stress_cmds[0], stats_aggregate_cmds=False, round_robin=False)
+            write_thread = self.run_stress_thread(
+                stress_cmd=stress_cmds[1], stats_aggregate_cmds=False, round_robin=False)
+            stress_threads = {"read": read_thread, "write": write_thread}
+            yield stress_threads
+        finally:
+            # wait for stress to complete
+            self.verify_stress_thread(cs_thread_pool=stress_threads.get("read"))
+            self.verify_stress_thread(cs_thread_pool=stress_threads.get("write"))
+            self.get_email_data()
+            LOGGER.info("Test finished.")
 
     def _stop_compaction_base_test_scenario(self,
                                             compaction_nemesis):

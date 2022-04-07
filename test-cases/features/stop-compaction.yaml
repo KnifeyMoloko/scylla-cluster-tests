@@ -1,4 +1,4 @@
-test_duration: 80
+test_duration: 120
 
 stress_cmd: ["cassandra-stress write cl=QUORUM duration=30m -schema 'replication(factor=3) compaction(strategy=LeveledCompactionStrategy)' -mode cql3 native -rate threads=40 -log interval=5",
              "cassandra-stress read cl=QUORUM duration=30m -mode cql3 native  -rate threads=40 -log interval=5"]

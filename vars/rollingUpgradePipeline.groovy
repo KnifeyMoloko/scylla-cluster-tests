@@ -99,17 +99,22 @@ def call(Map pipelineParams) {
                                 wrap([$class: 'BuildUser']) {
                                     dir('scylla-cluster-tests') {
                                         checkout scm
-                                        ArrayList base_versions_list = params.base_versions.contains('.') ? params.base_versions.split('\\,') : []
-                                        supportedVersions = supportedUpgradeFromVersions(
-                                            base_versions_list,
-                                            pipelineParams.linux_distro,
-                                            params.new_scylla_repo
-                                        )
-                                        (testDuration,
-                                         testRunTimeout,
-                                         runnerTimeout,
-                                         collectLogsTimeout,
-                                         resourceCleanupTimeout) = getJobTimeouts(params, builder.region)
+                                        try {
+                                            ArrayList base_versions_list = params.base_versions.contains('.') ? params.base_versions.split('\\,') : []
+                                            supportedVersions = supportedUpgradeFromVersions(
+                                                base_versions_list,
+                                                pipelineParams.linux_distro,
+                                                params.new_scylla_repo
+                                            )
+                                        } catch (Exception e) {
+                                            println(e)
+                                            error("Run aborted due to inability to list supported upgrade-from versions.")
+                                        }
+                                            (testDuration,
+                                             testRunTimeout,
+                                             runnerTimeout,
+                                             collectLogsTimeout,
+                                             resourceCleanupTimeout) = getJobTimeouts(params, builder.region)
                                     }
                                 }
                             }

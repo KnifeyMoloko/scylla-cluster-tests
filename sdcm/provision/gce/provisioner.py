@@ -10,9 +10,18 @@
 # See LICENSE for more details.
 #
 # Copyright (c) 2022 ScyllaDB
-import json
 import logging
+import random
+from pprint import pprint
 from typing import Dict, List
+
+from libcloud.compute.base import Node, NodeLocation
+
+from sdcm.keystore import KeyStore
+from sdcm.provision.gce import GCE_REGIONS
+from sdcm.provision.gce.disk_struct_provider import DiskStructProvider, DiskStructArgs
+from sdcm.provision.gce.metadata_provider import MetadataProvider, MetadataArgs
+from sdcm.provision.gce.virtual_machine_provider import VirtualMachineProvider
 from sdcm.provision.provisioner import Provisioner, InstanceDefinition, VmInstance, PricingModel
 from sdcm.utils.gce_utils import get_gce_service
 
@@ -22,111 +31,99 @@ LOGGER = logging.getLogger(__name__)
 class GCEProvisioner(Provisioner):
     """Provides API for VM provisioning in GCE"""
 
-    def __init__(self, test_id, region):
+    def __init__(self, test_id, region, params: dict):
         super().__init__(test_id, region)
+        self._params = params
         self._gce_service = get_gce_service(region=self.region)
+        self._location = random.choice(self._get_available_locations())
+        self._service_accounts = KeyStore().get_gcp_service_accounts()
+        self._ex_disk_struct_provider = DiskStructProvider()
+        self._ex_metadata_provider = MetadataProvider()
+        self._vm_provider = VirtualMachineProvider(region=region,
+                                                   disk_struct_provider=DiskStructProvider(),
+                                                   metadata_provider=MetadataProvider())
 
     @classmethod
     def discover_regions(cls, test_id) -> List["Provisioner"]:
-        pass
+        gce_service = get_gce_service(region=GCE_REGIONS.us_east1)
+        gce_locations: list[NodeLocation] = gce_service.list_locations()
+        return [cls(test_id=test_id, region=location.name, params={}) for location in gce_locations]
+
+    @property
+    def cluster_params(self):
+        return self._params
+
+    @cluster_params.setter
+    def cluster_params(self, params: dict):
+        self._params = params
 
     def get_or_create_instance(self,
                                definition: InstanceDefinition,
                                pricing_model: PricingModel = PricingModel.SPOT) -> VmInstance:
         """
-        common_params = dict(gce_image_username=self.params.get('gce_image_username'),
-                             gce_network=self.params.get('gce_network'),
-                             credentials=self.credentials,
-                             user_prefix=user_prefix,
-                             params=self.params,
-                             gce_datacenter=gce_datacenter,
-                             )
-        ScyllaGCECluster(gce_image=gce_image_db,
-                                               gce_image_type=db_info['disk_type'],
-                                               gce_image_size=db_info['disk_size'],
-                                               gce_n_local_ssd=db_info['n_local_ssd'],
-                                               gce_instance_type=db_info['type'],
-                                               services=services,
-                                               n_nodes=db_info['n_nodes'],
-                                               add_disks=cluster_additional_disks,
-                                               service_accounts=service_accounts,
-                                               **common_params)
-
-       create_node_params = dict(name=name,
-                                  size=self._gce_instance_type,
-                                  image=self._gce_image,
-                                  ex_network=self._gce_network,
-                                  ex_disks_gce_struct=gce_disk_struct,
-                                  ex_metadata={**self.tags,
-                                               "Name": name,
-                                               "NodeIndex": node_index,
-                                               "startup-script": startup_script,
-                                               "user-data": json.dumps(dict(scylla_yaml=dict(cluster_name=self.name),
-                                                                            start_scylla_on_first_boot=False,
-                                                                            raid_level=raid_level)),
-                                               "block-project-ssh-keys": "true",
-                                               "ssh-keys": f"{username}:ssh-rsa {public_key}", },
-                                  ex_service_accounts=self._service_accounts,
-                                  ex_preemptible=spot)
-
+        Create VmInstance in provided region, specified by InstanceDefinition
         """
-        # from defaults - change this to self.params later
-        defaults = {
-            "gce_network": 'qa-vpc',
-            "gce_image_username": 'scylla-test',
-            "user_prefix": "gce-qa-provisioner-test",
-            "params": {},
-            "gce_datacenter": 'us-east1',
-        }
+        gce_project_name = self._gce_service.ex_get_project().name
 
-        # TODO: get gce disk strcut -> DiskStructProvisioner
-        # TODO: get metadata -> GCEMetadataProvisioner
-        #
+        disk_struct_args = DiskStructArgs(
+            instance_definition=definition,
+            disk_type=self.cluster_params.get("root_disk_type"),  # TODO: replace with self.params
+            gce_services_project_name=gce_project_name,
+            location_name=self._location,
+            local_disk_count=2,
+            persistent_disks={"SCRATCH": 375}
+        )
+
+        metadata_args = MetadataArgs(
+            name=definition.name,
+            username=self.cluster_params.get("gce_image_username"),  # self.params.get("gce_image_username")
+            public_key=definition.ssh_key.public_key,
+            tags=definition.tags,  # self.tags
+            node_index=definition.instance_index,  # node_index
+            startup_script="",  # self.test_config.get_startup_script()
+            cluster_name="provisioning",  # self.name
+            raid_level=self.cluster_params.get("raid_level")  # self.params.get("raid_level")
+        )
 
         instance_params = {
             "name": definition.name,
             "size": definition.type,
             "image": definition.image_id,
-            "ex_network": defaults.get("gce_network"),
-            "ex_disks_gce_struct": gce_disk_struct,
-            "ex_metadata": {
-                **self.tags,
-                "Name": name,
-                "NodeIndex": node_index,
-                "startup-script": startup_script,
-                "user-data": json.dumps(
-                    dict(
-                        scylla_yaml=dict(
-                            "cluster_name": self.name),
-                "start_scylla_on_first_boot": False,
-                "raid_level": raid_level)),
-                "block-project-ssh-keys": "true",
-                "ssh-keys": f"{username}:ssh-rsa {public_key}"},
-        "ex_service_accounts": self._service_accounts,
-        "ex_preemptible": pricing_model
+            "ex_network": self.cluster_params.get("gce_network"),
+            "ex_disks_gce_struct": self._ex_disk_struct_provider.get_disks_struct(disk_struct_args),
+            "ex_metadata": self._ex_metadata_provider.get_ex_metadata(metadata_args),
+            "ex_service_accounts": self._service_accounts,
+            "ex_preemptible": pricing_model == pricing_model.SPOT
         }
 
-        # print(definition)
-        # new_node = self._gce_service.create_node(
-        #     name=definition.name,
-        #     size=definition.type,
-        #     image=definition.image_id,
-        # )
-        print(new_node)
-        # get gce service for the region
-        # get instance params using InstanceDefinition and other data
-        # call create_node with the params
+        pprint(instance_params)
+        new_node: Node = self._vm_provider.get_or_create_instance(disk_struct_args=disk_struct_args,
+                                                                  metadata_args=metadata_args,
+                                                                  instance_definition=definition,
+                                                                  pricing_model=pricing_model,
+                                                                  params=self.cluster_params)
 
-        pass
+        vm_instance = VmInstance(name=new_node.name,
+                                 region=self._location,
+                                 user_name=metadata_args.username,
+                                 public_ip_address=new_node.public_ips[0],
+                                 private_ip_address=new_node.private_ips[0],
+                                 ssh_key_name=definition.ssh_key.name,
+                                 tags={},  # TODO: get tags
+                                 pricing_model=pricing_model.value,
+                                 image=new_node.image,
+                                 _provisioner=self)
+        print(vm_instance)
+        return vm_instance
 
     def terminate_instance(self, name: str, wait: bool = False) -> None:
-        pass
+        self._vm_provider.destroy_instance(name)
 
     def reboot_instance(self, name: str, wait: bool) -> None:
-        pass
+        self._vm_provider.reboot_instance(name)
 
     def list_instances(self) -> List[VmInstance]:
-        pass
+        return self._vm_provider.list_running_instances()
 
     def cleanup(self, wait: bool = False) -> None:
         pass
@@ -134,124 +131,12 @@ class GCEProvisioner(Provisioner):
     def add_instance_tags(self, name: str, tags: Dict[str, str]) -> None:
         pass
 
+    @staticmethod
+    def list_regions():
+        # TODO: use the discover API module
+        return NotImplementedError
 
-# class AzureProvisioner(Provisioner):  # pylint: disable=too-many-instance-attributes
-#     """Provides api for VM provisioning in Azure cloud, tuned for Scylla QA. """
-#
-#     def __init__(self, test_id: str, region: str,  # pylint: disable=unused-argument
-#                  azure_service: AzureService = AzureService(), **kwargs):
-#         super().__init__(test_id, region)
-#         self._azure_service: AzureService = azure_service
-#         self._cache: Dict[str, VmInstance] = {}
-#         LOGGER.info("getting resources for %s...", self._resource_group_name)
-#         self._rg_provider = ResourceGroupProvider(self._resource_group_name, self._region, self._azure_service)
-#         self._network_sec_group_provider = NetworkSecurityGroupProvider(self._resource_group_name, self._region,
-#                                                                         self._azure_service)
-#         self._vnet_provider = VirtualNetworkProvider(self._resource_group_name, self._region, self._azure_service)
-#         self._subnet_provider = SubnetProvider(self._resource_group_name, self._azure_service)
-#         self._ip_provider = IpAddressProvider(self._resource_group_name, self._region, self._azure_service)
-#         self._nic_provider = NetworkInterfaceProvider(self._resource_group_name, self._region, self._azure_service)
-#         self._vm_provider = VirtualMachineProvider(self._resource_group_name, self._region, self._azure_service)
-#         for v_m in self._vm_provider.list():
-#             self._cache[v_m.name] = self._vm_to_instance(v_m)
-#
-#     @classmethod
-#     def discover_regions(cls, test_id: str = "") -> List["AzureProvisioner"]:
-#         """Discovers provisioners for in each region for given test id.
-#
-#         If test_id is not provided, it discovers all related to SCT provisioners."""
-#         all_resource_groups = [rg for rg in AzureService().resource.resource_groups.list()
-#                                if rg.name.startswith("SCT-")]
-#         if test_id:
-#             provisioner_params = [(test_id, rg.location) for rg in all_resource_groups if test_id in rg.name]
-#         else:
-#             # extract test_id from rg names where rg.name format is: SCT-<test_id>-<region>
-#             provisioner_params = [(test_id, rg.location) for rg in all_resource_groups
-#                                   if (test_id := "-".join(rg.name.split("-")[1:-1]))]
-#         return [cls(*params) for params in provisioner_params]
-#
-#     def get_or_create_instance(self, definition: InstanceDefinition,
-#                                pricing_model: PricingModel = PricingModel.SPOT) -> VmInstance:
-#         """Create virtual machine in provided region, specified by InstanceDefinition"""
-#         if definition.name in self._cache:
-#             return self._cache[definition.name]
-#         self._rg_provider.get_or_create()
-#         sec_group_id = self._network_sec_group_provider.get_or_create(security_rules=ScyllaOpenPorts).id
-#         vnet_name = self._vnet_provider.get_or_create().name
-#         subnet_id = self._subnet_provider.get_or_create(vnet_name, sec_group_id).id
-#         ip_address_id = self._ip_provider.get_or_create(definition.name).id
-#         nic_id = self._nic_provider.get_or_create(subnet_id, ip_address_id, name=definition.name).id
-#         v_m = self._vm_provider.get_or_create(definition, nic_id, pricing_model)
-#         instance = self._vm_to_instance(v_m)
-#         self._cache[definition.name] = instance
-#         return instance
-#
-#     def terminate_instance(self, name: str, wait: bool = True) -> None:
-#         """Terminates virtual machine, cleaning attached ip address and network interface."""
-#         instance = self._cache.get(name)
-#         if not instance:
-#             LOGGER.warning("Instance %s does not exist. Shouldn't have called it", name)
-#             return
-#         self._vm_provider.delete(name, wait=wait)
-#         del self._cache[name]
-#         self._nic_provider.delete(self._nic_provider.get(name))
-#         self._ip_provider.delete(self._ip_provider.get(name))
-#
-#     def reboot_instance(self, name: str, wait=True) -> None:
-#         self._vm_provider.reboot(name, wait)
-#
-#     def list_instances(self) -> List[VmInstance]:
-#         """List virtual machines for given provisioner."""
-#         return list(self._cache.values())
-#
-#     def cleanup(self, wait: bool = False) -> None:
-#         """Triggers delete of all resources."""
-#         tasks = []
-#         self._rg_provider.delete(wait)
-#         self._network_sec_group_provider.clear_cache()
-#         self._vnet_provider.clear_cache()
-#         self._subnet_provider.clear_cache()
-#         self._ip_provider.clear_cache()
-#         self._nic_provider.clear_cache()
-#         self._vm_provider.clear_cache()
-#         self._cache = {}
-#         if wait is True:
-#             LOGGER.info("Waiting for completion of all resources cleanup")
-#             for task in tasks:
-#                 task.wait()
-#
-#     def add_instance_tags(self, name: str, tags: Dict[str, str]) -> None:
-#         """Adds tags to instance."""
-#         LOGGER.info("Adding tags '%s' to intance '%s'...", tags, name)
-#         instance = self._vm_to_instance(self._vm_provider.add_tags(name, tags))
-#         self._cache[name] = instance
-#         LOGGER.info("Added tags '%s' to intance '%s'", tags, name)
-#
-#     @property
-#     def _resource_group_name(self):
-#         return f"SCT-{self._test_id}-{self._region}"
-#
-#     def _vm_to_instance(self, v_m: VirtualMachine) -> VmInstance:
-#         pub_address = self._ip_provider.get(v_m.name).ip_address
-#         nic = self._nic_provider.get(v_m.name)
-#         priv_address = nic.ip_configurations[0].private_ip_address
-#         tags = v_m.tags.copy()
-#         try:
-#             admin = v_m.os_profile.admin_username
-#         except AttributeError:
-#             # specialized machines don't provide usernames
-#             # todo lukasz: find a way to get admin name from image (is it possible??)
-#             admin = ""
-#         image = str(v_m.storage_profile.image_reference)
-#         if v_m.priority is VirtualMachinePriorityTypes.REGULAR:
-#             pricing_model = PricingModel.ON_DEMAND
-#         else:
-#             pricing_model = PricingModel.SPOT
-#
-#         return VmInstance(name=v_m.name, region=v_m.location, user_name=admin, public_ip_address=pub_address,
-#                           private_ip_address=priv_address, tags=tags, pricing_model=pricing_model,
-#                           image=image, _provisioner=self)
-#
-#
-#
-#
+    def _get_available_locations(self) -> list[str]:
+        region = self._gce_service.region
+        locations = [item.name for item in self._gce_service.list_locations() if item.name.startswith(region.name)]
+        return locations

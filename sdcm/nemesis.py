@@ -4420,6 +4420,21 @@ class RepairStreamingErrMonkey(Nemesis):
         self.disrupt_repair_streaming_err()
 
 
+class MockDecommissionMonkey(Nemesis):
+    disruptive = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.disrupt_methods_list = [
+            'disrupt_decommission_streaming_err',
+            'disrupt_rebuild_streaming_err',
+            'disrupt_repair_streaming_err'
+        ]
+
+    def disrupt(self):
+        self.call_random_disrupt_method(disrupt_methods=self.disrupt_methods_list, predefined_sequence=False)
+
+
 DEPRECATED_LIST_OF_NEMESISES = [UpgradeNemesis, UpgradeNemesisOneNode, RollbackNemesis]
 
 COMPLEX_NEMESIS = [NoOpMonkey, ChaosMonkey,

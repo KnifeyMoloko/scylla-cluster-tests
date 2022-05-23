@@ -319,6 +319,7 @@ class GCECluster(cluster.BaseCluster):  # pylint: disable=too-many-instance-attr
                 sudo systemctl disable sshguard
                 sudo systemctl stop sshguard
             """)
+
         username = self.params.get("gce_image_username")
         public_key = pub_key_from_private_key_file(self.params.get("user_credentials_path"))
         raid_level = self.params.get("raid_level")

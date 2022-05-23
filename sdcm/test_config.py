@@ -252,6 +252,7 @@ class TestConfig(metaclass=Singleton):  # pylint: disable=too-many-public-method
             syslog_host_port=host_port,
             logs_transport=cls._tester_obj.params.get('logs_transport') if cls._tester_obj else "rsyslog",
             disable_ssh_while_running=True,
+            configure_sshd=True
         ).to_string()
 
     @classmethod

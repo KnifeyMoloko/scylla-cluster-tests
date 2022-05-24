@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Dict
 
+from libcloud.compute.base import Node
+
 from sdcm.keystore import SSHKey
 from sdcm.provision.user_data import UserDataObject
 
@@ -26,19 +28,19 @@ class VmArch(Enum):
 
 
 @dataclass
-class DataDisk:
-    type: str
-    size: int
-    iops: int
+class DataDisk(ABC):
+    type: str = None
+    size: int = None
 
 
 @dataclass
 class InstanceDefinition:  # pylint: disable=too-many-instance-attributes
+    instance_index: int
     name: str
     image_id: str
     type: str   # instance_type from yaml
     user_name: str
-    ssh_key: SSHKey = field(repr=False)
+    ssh_key: SSHKey | str = field(repr=False)
     tags: Dict[str, str] = field(default_factory=dict)
     arch: VmArch = VmArch.X86
     root_disk_size: int | None = None
@@ -78,6 +80,11 @@ class VmInstance:  # pylint: disable=too-many-instance-attributes
     pricing_model: PricingModel
     image: str
     _provisioner: "Provisioner"
+    _node: Node = None
+
+    @property
+    def node(self):
+        return self._node
 
     def terminate(self, wait: bool = True) -> None:
         """terminates VM instance.

@@ -12,7 +12,6 @@
 # Copyright (c) 2022 ScyllaDB
 import logging
 import random
-from pprint import pprint
 from typing import Dict, List
 
 from libcloud.compute.base import Node, NodeLocation
@@ -23,6 +22,7 @@ from sdcm.provision.gce.disk_struct_provider import DiskStructProvider, DiskStru
 from sdcm.provision.gce.metadata_provider import MetadataProvider, MetadataArgs
 from sdcm.provision.gce.virtual_machine_provider import VirtualMachineProvider
 from sdcm.provision.provisioner import Provisioner, InstanceDefinition, VmInstance, PricingModel
+from sdcm.test_config import TestConfig
 from sdcm.utils.gce_utils import get_gce_service
 
 LOGGER = logging.getLogger(__name__)
@@ -67,36 +67,23 @@ class GCEProvisioner(Provisioner):
 
         disk_struct_args = DiskStructArgs(
             instance_definition=definition,
-            disk_type=self.cluster_params.get("root_disk_type"),  # TODO: replace with self.params
+            root_disk_type=self.cluster_params.get("gce_root_disk_type_db"),
             gce_services_project_name=gce_project_name,
             location_name=self._location,
-            local_disk_count=2,
-            persistent_disks={"SCRATCH": 375}
+            data_disks=definition.data_disks
         )
 
         metadata_args = MetadataArgs(
             name=definition.name,
-            username=self.cluster_params.get("gce_image_username"),  # self.params.get("gce_image_username")
-            public_key=definition.ssh_key.public_key,
-            tags=definition.tags,  # self.tags
-            node_index=definition.instance_index,  # node_index
-            startup_script="",  # self.test_config.get_startup_script()
+            username=self.cluster_params.get("gce_image_username"),
+            public_key=definition.ssh_key,
+            tags=definition.tags,
+            node_index=definition.instance_index,
+            startup_script=TestConfig().get_startup_script(),
             cluster_name="provisioning",  # self.name
-            raid_level=self.cluster_params.get("raid_level")  # self.params.get("raid_level")
+            raid_level=self.cluster_params.get("raid_level")
         )
 
-        instance_params = {
-            "name": definition.name,
-            "size": definition.type,
-            "image": definition.image_id,
-            "ex_network": self.cluster_params.get("gce_network"),
-            "ex_disks_gce_struct": self._ex_disk_struct_provider.get_disks_struct(disk_struct_args),
-            "ex_metadata": self._ex_metadata_provider.get_ex_metadata(metadata_args),
-            "ex_service_accounts": self._service_accounts,
-            "ex_preemptible": pricing_model == pricing_model.SPOT
-        }
-
-        pprint(instance_params)
         new_node: Node = self._vm_provider.get_or_create_instance(disk_struct_args=disk_struct_args,
                                                                   metadata_args=metadata_args,
                                                                   instance_definition=definition,
@@ -108,16 +95,24 @@ class GCEProvisioner(Provisioner):
                                  user_name=metadata_args.username,
                                  public_ip_address=new_node.public_ips[0],
                                  private_ip_address=new_node.private_ips[0],
-                                 ssh_key_name=definition.ssh_key.name,
-                                 tags={},  # TODO: get tags
+                                 ssh_key_name=KeyStore().get_gce_ssh_key_pair().name,
+                                 tags=definition.tags,
                                  pricing_model=pricing_model.value,
                                  image=new_node.image,
-                                 _provisioner=self)
-        print(vm_instance)
+                                 _provisioner=self,
+                                 _node=new_node)
         return vm_instance
 
-    def terminate_instance(self, name: str, wait: bool = False) -> None:
-        self._vm_provider.destroy_instance(name)
+    def get_or_create_instances(self, definitions: List[InstanceDefinition],
+                                pricing_model: PricingModel = PricingModel.SPOT) -> List[VmInstance]:
+        vm_instances = []
+
+        for definition in definitions:
+            vm_instances.append(self.get_or_create_instance(definition=definition, pricing_model=pricing_model))
+        return vm_instances
+
+    def terminate_instance(self, name: str, wait: bool = False) -> bool:
+        return self._vm_provider.destroy_instance(name)
 
     def reboot_instance(self, name: str, wait: bool) -> None:
         self._vm_provider.reboot_instance(name)
@@ -129,7 +124,7 @@ class GCEProvisioner(Provisioner):
         pass
 
     def add_instance_tags(self, name: str, tags: Dict[str, str]) -> None:
-        pass
+        self._vm_provider.add_tags(vm_instance_name=name, tags=tags)
 
     @staticmethod
     def list_regions():

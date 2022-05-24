@@ -16,6 +16,7 @@ import json
 import random
 import logging
 
+from libcloud.compute.base import NodeDriver
 from libcloud.compute.providers import Provider, get_driver
 
 from sdcm.keystore import KeyStore
@@ -57,7 +58,7 @@ def _get_gce_service(credentials: dict, datacenter: str) -> GceDriver:
                      project=credentials["project_id"])
 
 
-def get_gce_services(regions: list) -> dict:
+def get_gce_services(regions: list) -> dict[str, NodeDriver]:
     credentials = KeyStore().get_gcp_credentials()
     return {region_az: _get_gce_service(credentials, region_az) for region_az in map(append_zone, regions)}
 

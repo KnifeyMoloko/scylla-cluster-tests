@@ -17,7 +17,7 @@ from sdcm.provision.common.builders import AttrBuilder
 from sdcm.provision.common.utils import (
     configure_rsyslog_target_script, configure_sshd_script, restart_sshd_service, restart_rsyslog_service,
     install_syslogng_service, configure_syslogng_target_script, restart_syslogng_service,
-    configure_rsyslog_rate_limits_script, configure_rsyslog_set_hostname_script, configure_legacy_rsa_keys_for_sshd)
+    configure_rsyslog_rate_limits_script, configure_rsyslog_set_hostname_script)
 
 
 RSYSLOG_SSH_TUNNEL_LOCAL_PORT = 5000
@@ -37,7 +37,6 @@ class ConfigurationScriptBuilder(AttrBuilder, metaclass=abc.ABCMeta):
     def to_string(self) -> str:
         script = self._start_script()
         script += self._script_body()
-        script += self._enable_legacy_rsa_keys()
         script += self._end_script()
         return script
 
@@ -89,15 +88,6 @@ class ConfigurationScriptBuilder(AttrBuilder, metaclass=abc.ABCMeta):
             script += restart_sshd_service()
         elif self.disable_ssh_while_running:
             script += 'systemctl start sshd || true\n'
-        return script
-
-    @staticmethod
-    def _enable_legacy_rsa_keys():
-        """
-        Add support for RSA-1 ssh keys in sshd config if
-        openssh version is larger than 8.8
-        """
-        script = configure_legacy_rsa_keys_for_sshd()
         return script
 
     def _rsyslog_configuration_script(self):

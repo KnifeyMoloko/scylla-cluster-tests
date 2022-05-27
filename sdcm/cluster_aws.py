@@ -370,6 +370,8 @@ class AWSCluster(cluster.BaseCluster):  # pylint: disable=too-many-instance-attr
         if self.params.get('ip_ssh_connections') == 'ipv6':
             post_boot_script += network_config_ipv6_workaround_script()
 
+        LOGGER.info("Post configuration sctipt before encoding:\n%s", post_boot_script)
+
         if isinstance(ec2_user_data, dict):
             ec2_user_data['post_configuration_script'] = base64.b64encode(
                 post_boot_script.encode('utf-8')).decode('ascii')

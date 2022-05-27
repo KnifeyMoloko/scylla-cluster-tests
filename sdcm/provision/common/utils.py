@@ -120,17 +120,6 @@ def configure_sshd_script():
     """)
 
 
-def configure_legacy_rsa_keys_for_sshd():
-    return dedent("""
-    # check if ssh version is larger than 8.8
-    if (( $(ssh -V 2>&1 | tr -d "[:alpha:][:blank:][:punct:]" | cut -c-2) >= 88 )); then
-        sed -i 's/#PubkeyAuthentication \(.*\)$/PubkeyAuthentication yes/' /etc/ssh/sshd_config || true
-        sed -i -e '$aPubkeyAcceptedAlgorithms +ssh-rsa' /etc/ssh/sshd_config || true
-        sed -i -e '$aHostKeyAlgorithms +ssh-rsa' /etc/ssh/sshd_config || true
-    fi
-    """)
-
-
 def restart_sshd_service():
     return "systemctl restart sshd || true\n"
 

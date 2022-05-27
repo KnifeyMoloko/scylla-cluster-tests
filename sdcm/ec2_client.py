@@ -2,6 +2,7 @@ import logging
 import datetime
 import time
 import base64
+from pathlib import Path
 
 import boto3
 from mypy_boto3_ec2 import EC2Client, EC2ServiceResource
@@ -92,7 +93,9 @@ class EC2ClientWrapper():
         if key_pair:
             params['LaunchSpecification'].update({'KeyName': key_pair})
         if user_data:
-            params['LaunchSpecification'].update({'UserData': self._encode_user_data(user_data)})
+            data_to_encode = self._get_cloud_init_yaml()
+            LOGGER.info("Cloud-init yaml:\n%s", data_to_encode)
+            params['LaunchSpecification'].update({'UserData': data_to_encode})
 
         LOGGER.info('Sending spot request with params: %s', params)
         resp = self._client.request_spot_instances(**params)
@@ -122,7 +125,9 @@ class EC2ClientWrapper():
         if key_pair:
             fleet_config['LaunchSpecifications'][0].update({'KeyName': key_pair})
         if user_data:
-            fleet_config['LaunchSpecifications'][0].update({'UserData': self._encode_user_data(user_data)})
+            data_to_encode = self._get_cloud_init_yaml()
+            LOGGER.info("Cloud-init yaml:\n%s", data_to_encode)
+            fleet_config['LaunchSpecifications'][0].update({'UserData': data_to_encode})
         if block_device_mappings:
             fleet_config['LaunchSpecifications'][0]['BlockDeviceMappings'] = block_device_mappings
         LOGGER.info('Sending spot fleet request with params: %s', fleet_config)
@@ -132,6 +137,12 @@ class EC2ClientWrapper():
         request_id = resp['SpotFleetRequestId']
         LOGGER.debug('Spot fleet request: %s', request_id)
         return request_id
+
+    def _get_cloud_init_yaml(self):
+        path = Path("./sdcm/provision/aws-cloud-init.txt")
+
+        with path.open(mode="r", encoding='utf-8') as stream:
+            return self._encode_user_data(stream.read())
 
     def _get_spot_price(self, instance_type):
         """

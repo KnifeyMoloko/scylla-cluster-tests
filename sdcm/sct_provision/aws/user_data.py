@@ -1,5 +1,6 @@
 import base64
 import json
+from pathlib import Path
 from typing import Union
 
 from pydantic import Field
@@ -59,7 +60,10 @@ class ScyllaUserDataBuilder(ScyllaUserDataBuilderBase):
         return base64.b64encode(post_boot_script.encode('utf-8')).decode('ascii')
 
     def to_string(self) -> str:
-        return self.return_in_old_format() if self.old_format else self.return_in_new_format()
+        path = Path("./sdcm/provision/aws-cloud-init.txt")
+        with path.open(mode="r", encoding="utf-8") as cloud_init_config:
+            return cloud_init_config.read()
+        # return self.return_in_old_format() if self.old_format else self.return_in_new_format()
 
     def return_in_new_format(self) -> str:
         return json.dumps(self.dict(exclude_defaults=True, exclude_unset=True, exclude_none=True))

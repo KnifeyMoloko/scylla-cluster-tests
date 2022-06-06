@@ -2810,6 +2810,9 @@ class Nemesis:  # pylint: disable=too-many-instance-attributes,too-many-public-m
                            node=self.target_node), \
             DbEventsFilter(db_event=DatabaseLogEvent.RUNTIME_ERROR,
                            line="got error in row level repair",
+                           node=self.target_node), \
+            DbEventsFilter(db_event=DatabaseLogEvent.RUNTIME_ERROR,
+                           line="Failed to handle STREAM_MUTATION_FRAGMENTS",
                            node=self.target_node):
             while time.time() - start_time < timeout:
                 if list(target_node_logs):
@@ -2863,7 +2866,6 @@ class Nemesis:  # pylint: disable=too-many-instance-attributes,too-many-public-m
         )
         ParallelObject(objects=[trigger, watcher], timeout=600).call_objects()
         decommission_post_action()
-        self.target_node.run_nodetool("rebuild")
 
     def start_and_interrupt_repair_streaming(self):
         """
@@ -4346,6 +4348,7 @@ class ScyllaOperatorBasicOperationsMonkey(Nemesis):
             'disrupt_mgmt_repair_cli',
             'disrupt_mgmt_backup_specific_keyspaces',
             'disrupt_mgmt_backup',
+            'disrupt_terminate_and_replace_node',
         ]
 
     def disrupt(self):
@@ -4421,6 +4424,32 @@ class RepairStreamingErrMonkey(Nemesis):
 
     def disrupt(self):
         self.disrupt_repair_streaming_err()
+
+
+class RepairTestMonkey(Nemesis):
+    """
+    Selected number of nemesis that is focused on scylla-operator functionality
+    """
+    disruptive = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.disrupt_methods_list = [
+            'disrupt_repair_streaming_err',
+            'disrupt_rebuild_streaming_err',
+            'disrupt_decommission_streaming_err',
+            'disrupt_snapshot_operations',
+            'disrupt_grow_shrink_cluster',
+            'disrupt_memory_stress',
+            'disrupt_corrupt_then_scrub',
+            'disrupt_start_stop_major_compaction',
+            'self.disrupt_destroy_data_then_repair',
+            'self.disrupt_destroy_data_then_rebuild',
+            'self.disrupt_nodetool_decommission'
+        ]
+
+    def disrupt(self):
+        self.call_random_disrupt_method(disrupt_methods=self.disrupt_methods_list, predefined_sequence=False)
 
 
 DEPRECATED_LIST_OF_NEMESISES = [UpgradeNemesis, UpgradeNemesisOneNode, RollbackNemesis]

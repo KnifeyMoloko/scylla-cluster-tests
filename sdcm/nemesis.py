@@ -4440,13 +4440,9 @@ class RepairTestMonkey(Nemesis):
             'disrupt_rebuild_streaming_err',
             'disrupt_decommission_streaming_err',
             'disrupt_snapshot_operations',
-            'disrupt_grow_shrink_cluster',
-            'disrupt_memory_stress',
-            'disrupt_corrupt_then_scrub',
-            'disrupt_start_stop_major_compaction',
-            'self.disrupt_destroy_data_then_repair',
-            'self.disrupt_destroy_data_then_rebuild',
-            'self.disrupt_nodetool_decommission'
+            'disrupt_destroy_data_then_repair',
+            'disrupt_destroy_data_then_rebuild',
+            'disrupt_nodetool_decommission'
         ]
 
     def disrupt(self):

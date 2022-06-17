@@ -23,7 +23,7 @@ from sdcm.nemesis import StartStopMajorCompaction, StartStopScrubCompaction, Sta
 from sdcm.rest.compaction_manager_client import CompactionManagerClient
 from sdcm.rest.storage_service_client import StorageServiceClient
 from sdcm.sct_events.group_common_events import ignore_compaction_stopped_exceptions
-from sdcm.send_email import LongevityEmailReporter
+from sdcm.send_email import FunctionalEmailReporter
 from sdcm.tester import ClusterTester
 from sdcm.utils.common import ParallelObject
 from sdcm.utils.compaction_ops import CompactionOps, CompactionTypes
@@ -35,14 +35,18 @@ class StopCompactionTest(ClusterTester):
     GREP_PATTERN = r"Compaction for ([\w/\d]+) was stopped"
     COMPACTION_TYPES = CompactionTypes()
 
+    def __init__(self, *args):
+        super().__init__(args)
+        self.test_statuses = {}
+
     def setUp(self):
         super().setUp()
         self.node = self.db_cluster.nodes[0]
         self.storage_service_client = StorageServiceClient(self.node)
         self.populate_data_parallel(size_in_gb=10, blocking=True)
         self.disable_autocompaction_on_all_nodes()
-        self.email_reporter = LongevityEmailReporter(email_recipients=self.params.get('email_recipients'),
-                                                     logdir=self.logdir)
+        self.email_reporter = FunctionalEmailReporter(email_recipients=self.params.get('email_recipients'),
+                                                      logdir=self.logdir)
 
     def disable_autocompaction_on_all_nodes(self):
         compaction_ops = CompactionOps(cluster=self.db_cluster)
@@ -333,11 +337,9 @@ class StopCompactionTest(ClusterTester):
         except Exception as error:  # pylint: disable=broad-except
             self.log.error("Error in gathering Grafana screenshots and snapshots. Error:\n%s", error)
 
-        benchmarks_results = self.db_cluster.get_node_benchmarks_results() if self.db_cluster else {}
-
         email_data.update({"grafana_screenshots": grafana_dataset.get("screenshots", []),
                            "grafana_snapshots": grafana_dataset.get("snapshots", []),
-                           "node_benchmarks": benchmarks_results,
+                           "test_statuses": self.test_statuses,
                            "scylla_ami_id": self.params.get("ami_id_db_scylla") or "-", })
         return email_data
 

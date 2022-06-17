@@ -2854,7 +2854,8 @@ class Nemesis:  # pylint: disable=too-many-instance-attributes,too-many-public-m
             return new_node
 
         trigger = partial(
-            self.target_node.run_nodetool, sub_cmd="decommission", warning_event_on_exception=(Exception,)
+            self.target_node.run_nodetool, sub_cmd="decommission", warning_event_on_exception=(Exception,),
+            ignore_status=True
         )
 
         watcher = partial(

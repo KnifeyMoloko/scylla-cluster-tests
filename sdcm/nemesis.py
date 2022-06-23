@@ -4638,3 +4638,27 @@ class StartStopValidationCompaction(Nemesis):
 
     def disrupt(self):
         self.disrupt_start_stop_validation_compaction()
+
+
+class JustTestingMonkey(Nemesis):
+    disruptive = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.disrupt_methods_list = [
+            'disrupt_start_stop_major_compaction',
+            'disrupt_start_stop_cleanup_compaction',
+            'disrupt_start_stop_scrub_compaction',
+            'disrupt_start_stop_validation_compaction',
+            'disrupt_stop_start_scylla_server',
+            'disrupt_nodetool_cleanup',
+            'disrupt_nodetool_drain',
+            'disrupt_nodetool_refresh',
+            'disrupt_major_compaction',
+            'disrupt_modify_table',
+            'disrupt_stop_wait_start_scylla_server',
+            'disrupt_soft_reboot_node',
+        ]
+
+    def disrupt(self):
+        self.call_random_disrupt_method(disrupt_methods=self.disrupt_methods_list, predefined_sequence=True)

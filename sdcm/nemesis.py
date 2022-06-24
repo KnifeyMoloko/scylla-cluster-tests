@@ -4494,3 +4494,19 @@ class StartStopValidationCompaction(Nemesis):
 
     def disrupt(self):
         self.disrupt_start_stop_validation_compaction()
+
+
+class ReturnToMonke(Nemesis):
+    disruptive = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.disrupt_methods_list = [
+            'disrupt_decommission_streaming_err',
+            'disrupt_rebuild_streaming_err',
+            'disrupt_repair_streaming_err',
+            'disrupt_stop_start_scylla_server'
+        ]
+
+    def disrupt(self):
+        self.call_random_disrupt_method(disrupt_methods=self.disrupt_methods_list, predefined_sequence=False)

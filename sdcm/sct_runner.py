@@ -11,9 +11,11 @@
 #
 # Copyright (c) 2021 ScyllaDB
 
+#pylint: disable=too-many-lines
 from __future__ import annotations
 
 import logging
+import string
 import tempfile
 import time
 import datetime
@@ -28,9 +30,15 @@ from dataclasses import dataclass, field
 
 import boto3
 import pytz
-from libcloud.common.google import ResourceNotFoundError as GoogleResourceNotFoundError
 from azure.core.exceptions import ResourceNotFoundError as AzureResourceNotFoundError
 from azure.mgmt.compute.models import GalleryImageVersion
+from azure.mgmt.compute.v2021_07_01.models import VirtualMachine
+from azure.mgmt.resource.resources.v2021_04_01.models import TagsPatchResource, TagsPatchOperation
+
+from libcloud.common.google import ResourceNotFoundError as GoogleResourceNotFoundError
+from libcloud.compute.base import Node
+from mypy_boto3_ec2 import EC2Client
+from mypy_boto3_ec2.service_resource import Instance
 
 from sdcm.keystore import KeyStore
 from sdcm.provision.provisioner import InstanceDefinition, PricingModel, VmInstance, provisioner_factory
@@ -73,14 +81,16 @@ def datetime_from_formatted(date_string: str) -> datetime.datetime:
 @dataclass
 class SctRunnerInfo:  # pylint: disable=too-many-instance-attributes
     sct_runner_class: Type[SctRunner] = field(repr=False)
-    cloud_service_instance: Any = field(repr=False)
+    cloud_service_instance: EC2Client | AzureService | None = field(repr=False)
     region_az: str
-    instance: Any = field(repr=False)
+    instance: VirtualMachine | Node | Any = field(repr=False)
     instance_name: str
     public_ips: list[str]
+    test_id: str | None = None
     launch_time: Optional[datetime.datetime] = None
     keep: Optional[str] = None
     keep_action: Optional[str] = None
+    logs_collected: bool = False
 
     @property
     def cloud_provider(self) -> str:
@@ -123,6 +133,7 @@ class SctRunner(ABC):
     def __init__(self, region_name: str, availability_zone: str = ""):
         self.region_name = region_name
         self.availability_zone = availability_zone
+        self._instance = None
         self._ssh_pkey_file = None
 
     @abstractmethod
@@ -244,6 +255,16 @@ class SctRunner(ABC):
             "Version": self.VERSION,
         }
 
+    @property
+    @abstractmethod
+    def instance(self):
+        ...
+
+    @instance.setter
+    @abstractmethod
+    def instance(self, new_instance_value):
+        ...
+
     @abstractmethod
     # pylint: disable=too-many-arguments
     def _create_instance(self,
@@ -256,6 +277,12 @@ class SctRunner(ABC):
                          test_duration: Optional[int] = None) -> Any:
         ...
 
+    @staticmethod
+    @abstractmethod
+    def set_tags(sct_runner_info: SctRunnerInfo,
+                 tags: dict):
+        ...
+
     @abstractmethod
     def _stop_image_builder_instance(self, instance: Any) -> None:
         ...
@@ -265,7 +292,7 @@ class SctRunner(ABC):
         ...
 
     @abstractmethod
-    def _get_instance_id(self, instance: Any) -> Any:
+    def _get_instance_id(self) -> Any:
         ...
 
     @abstractmethod
@@ -317,7 +344,7 @@ class SctRunner(ABC):
             LOGGER.info("SCT Image Builder instance stopped.\nCreating image...")
             self._create_image(instance=instance)
 
-            builder_instance_id = self._get_instance_id(instance=instance)
+            builder_instance_id = self._get_instance_id()
             try:
                 LOGGER.info("Terminating SCT Image Builder instance `%s'...", builder_instance_id)
                 self._terminate_image_builder_instance(instance=instance)
@@ -397,6 +424,8 @@ class AwsSctRunner(SctRunner):
 
     def __init__(self, region_name: str, availability_zone: str):
         super().__init__(region_name=region_name, availability_zone=availability_zone)
+        if region_name.endswith(tuple(string.ascii_lowercase)):
+            region_name = region_name[:-1]
         self.aws_region = AwsRegion(region_name=region_name)
         self.aws_region_source = AwsRegion(region_name=self.SOURCE_IMAGE_REGION)
 
@@ -406,6 +435,14 @@ class AwsSctRunner(SctRunner):
     @cached_property
     def image_name(self) -> str:
         return f"sct-runner-{self.VERSION}"
+
+    @property
+    def instance(self) -> Instance:
+        return self._instance
+
+    @instance.setter
+    def instance(self, new_instance_value: Instance):
+        self._instance = new_instance_value
 
     @cached_property
     def key_pair(self) -> SSHKey:
@@ -494,6 +531,7 @@ class AwsSctRunner(SctRunner):
         ec2_instance_wait_public_ip(instance=instance)
 
         LOGGER.info("Got public IP: %s", instance.public_ip_address)
+        self.instance = instance
 
         return instance
 
@@ -504,8 +542,8 @@ class AwsSctRunner(SctRunner):
     def _terminate_image_builder_instance(self, instance: Any) -> None:
         instance.terminate()
 
-    def _get_instance_id(self, instance: Any) -> Any:
-        return instance.instance_id
+    def _get_instance_id(self) -> Any:
+        return self.instance.instance_id
 
     def get_instance_public_ip(self, instance: Any) -> str:
         return instance.public_ip_address
@@ -568,11 +606,13 @@ class AwsSctRunner(SctRunner):
                     cloud_service_instance=client,
                     region_az=instance["Placement"]["AvailabilityZone"],
                     instance=instance,
+                    test_id=tags.get("TestId"),
                     instance_name=instance_name,
                     public_ips=[instance.get("PublicIpAddress"), ],
                     launch_time=instance["LaunchTime"],
                     keep=tags.get("keep"),
                     keep_action=tags.get("keep_action"),
+                    logs_collected=tags.get("logs_collected")
                 ))
         return sct_runners
 
@@ -582,9 +622,24 @@ class AwsSctRunner(SctRunner):
             InstanceIds=[sct_runner_info.instance["InstanceId"], ],
         )
 
+    @staticmethod
+    def set_tags(sct_runner_info: SctRunnerInfo,
+                 tags: dict) -> None:
+        tags_to_create = []
+        for key, value in tags.items():
+            tags_to_create.append({"Key": key, "Value": value})
+
+        cloud_instance: EC2Client = sct_runner_info.cloud_service_instance
+        # extract instance id from SctRunner.instance_name, e.g. sct-runner-1.5-instance-81d39f6f (i-02e72ea7f5aac9d65)
+        cloud_instance_name = sct_runner_info.instance_name.split("(")[1].replace(")", "")
+        LOGGER.info("Updating SCT Runner %s with tags: %s...", cloud_instance_name, tags_to_create)
+        cloud_instance.create_tags(Resources=[cloud_instance_name], Tags=tags_to_create)
+        LOGGER.info("Updated SCT Runner %s with tags: %s successfully.", cloud_instance_name, tags_to_create)
+
 
 class GceSctRunner(SctRunner):
     """Provision and configure the SCT runner on GCE."""
+
     CLOUD_PROVIDER = "gce"
     BASE_IMAGE = "https://www.googleapis.com/compute/v1/projects/ubuntu-os-cloud/global/images/family/ubuntu-2004-lts"
     SOURCE_IMAGE_REGION = "us-east1"  # where the source Runner image will be created and copied to other regions
@@ -600,11 +655,24 @@ class GceSctRunner(SctRunner):
         self.gce_service = get_gce_service(region=region_name)
         self.gce_service_source = get_gce_service(region=self.SOURCE_IMAGE_REGION)
         self.project_name = self.gce_service.ex_get_project().name
+        self._instance_name = None
 
     def region_az(self, region_name: str, availability_zone: str) -> str:
         if availability_zone:
             return f"{region_name}-{availability_zone}"
         return region_name
+
+    @property
+    def instance_name(self) -> str:
+        return self._instance_name
+
+    @instance_name.setter
+    def instance_name(self, new_name: str) -> None:
+        self._instance_name = new_name
+
+    @property
+    def instance(self) -> Node:
+        return self.gce_service.ex_get_node(self.instance_name, zone=self.availability_zone)
 
     @cached_property
     def image_name(self) -> str:
@@ -625,6 +693,14 @@ class GceSctRunner(SctRunner):
             return gce_service.ex_get_image(self.image_name)
         except GoogleResourceNotFoundError:
             return None
+
+    @staticmethod
+    def set_tags(sct_runner_info: SctRunnerInfo,
+                 tags: dict):
+        LOGGER.info("Setting SCT runner labels to: %s", tags)
+        gce_service = get_gce_service(sct_runner_info.region_az)
+        gce_service.ex_set_node_labels(node=sct_runner_info.instance, labels=tags)
+        LOGGER.info("SCT runner tags set to: %s", tags)
 
     @staticmethod
     def tags_to_labels(tags: dict[str, str]) -> dict[str, str]:
@@ -671,6 +747,7 @@ class GceSctRunner(SctRunner):
         time.sleep(30)  # wait until the public IPs are available.
 
         LOGGER.info("Got public IP: %s", instance.public_ips[0])
+        self.instance_name = instance_name
 
         return instance
 
@@ -680,8 +757,8 @@ class GceSctRunner(SctRunner):
     def _terminate_image_builder_instance(self, instance: Any) -> None:
         self.gce_service_source.destroy_node(instance)
 
-    def _get_instance_id(self, instance: Any) -> Any:
-        return instance.id
+    def _get_instance_id(self) -> Any:
+        return self.instance.name
 
     def get_instance_public_ip(self, instance: Any) -> str:
         return instance.public_ips[0]
@@ -729,9 +806,11 @@ class GceSctRunner(SctRunner):
                 instance=instance,
                 instance_name=instance.name,
                 public_ips=instance.public_ips,
+                test_id=tags.get("TestId"),
                 launch_time=launch_time,
                 keep=tags.get("keep"),
                 keep_action=tags.get("keep_action"),
+                logs_collected=tags.get("logs_collected")
             ))
         return sct_runners
 
@@ -742,6 +821,7 @@ class GceSctRunner(SctRunner):
 
 class AzureSctRunner(SctRunner):
     """Provision and configure the SCT runner on Azure."""
+
     CLOUD_PROVIDER = "azure"
     GALLERY_IMAGE_NAME = "sct-runner"
     GALLERY_IMAGE_VERSION = f"{SctRunner.VERSION}.0"  # Azure requires to have it in `X.Y.Z' format
@@ -761,9 +841,18 @@ class AzureSctRunner(SctRunner):
         self.azure_region = AzureRegion(region_name=region_name)
         self.azure_region_source = AzureRegion(region_name=self.SOURCE_IMAGE_REGION)
         self.azure_service = self.azure_region.azure_service
+        self._instance = None
 
     def region_az(self, region_name: str, availability_zone: str) -> str:
         return region_name
+
+    @property
+    def instance(self) -> VmInstance | VirtualMachine:
+        return self._instance
+
+    @instance.setter
+    def instance(self, new_instance_value: VmInstance | VirtualMachine):
+        self._instance = new_instance_value
 
     @cached_property
     def image_name(self) -> str:
@@ -803,7 +892,7 @@ class AzureSctRunner(SctRunner):
                 "admin_username": self.LOGIN_USER,
                 "admin_public_key": self.key_pair.public_key.decode(),
             }
-            return azure_region.create_virtual_machine(
+            self.instance = azure_region.create_virtual_machine(
                 vm_name=instance_name,
                 vm_size=instance_type,
                 image=base_image,
@@ -811,6 +900,8 @@ class AzureSctRunner(SctRunner):
                 tags=tags | {"launch_time": get_current_datetime_formatted()},
                 **additional_kwargs,
             )
+
+            return self.instance
         else:
             test_id = tags["TestId"]
             provisioner = provisioner_factory.create_provisioner(backend="azure", test_id=test_id,
@@ -824,8 +915,9 @@ class AzureSctRunner(SctRunner):
                                            root_disk_size=root_disk_size_gb or self.instance_root_disk_size(
                                                test_duration=test_duration),
                                            user_data=None)
-            return provisioner.get_or_create_instance(definition=vm_params,
-                                                      pricing_model=PricingModel.ON_DEMAND)
+            self.instance = provisioner.get_or_create_instance(definition=vm_params,
+                                                               pricing_model=PricingModel.ON_DEMAND)
+            return self.instance
 
     def _stop_image_builder_instance(self, instance: Any) -> None:
         self.azure_region_source.deallocate_virtual_machine(vm_name=instance.name)
@@ -833,8 +925,8 @@ class AzureSctRunner(SctRunner):
     def _terminate_image_builder_instance(self, instance: Any) -> None:
         self.azure_service.delete_virtual_machine(virtual_machine=instance)
 
-    def _get_instance_id(self, instance: Any) -> Any:
-        return instance.id
+    def _get_instance_id(self) -> Any:
+        return self.instance.id or self.instance.vm_id
 
     def get_instance_public_ip(self, instance: Any) -> str:
         if isinstance(instance, VmInstance):
@@ -889,14 +981,33 @@ class AzureSctRunner(SctRunner):
                 instance_name=instance.name,
                 public_ips=[azure_service.get_virtual_machine_ips(virtual_machine=instance).public_ip],
                 launch_time=launch_time,
+                test_id=instance.tags.get("TestId"),
                 keep=instance.tags.get("keep"),
                 keep_action=instance.tags.get("keep_action"),
+                logs_collected=instance.tags.get("logs_collected")
             ))
         return sct_runners
 
     @staticmethod
     def terminate_sct_runner_instance(sct_runner_info: SctRunnerInfo) -> None:
         sct_runner_info.cloud_service_instance.delete_virtual_machine(virtual_machine=sct_runner_info.instance)
+
+    @staticmethod
+    def set_tags(sct_runner_info: SctRunnerInfo,
+                 tags: dict):
+        resource_mgmt_client = sct_runner_info.cloud_service_instance.resource
+        instance: VirtualMachine = sct_runner_info.instance
+
+        params = TagsPatchResource.from_dict(
+            {
+                "operation": TagsPatchOperation.MERGE.value,  # pylint:disable=no-member
+                "properties": {
+                    "tags": tags
+                }
+            }
+        )
+
+        resource_mgmt_client.tags.create_or_update_at_scope(scope=instance.id, parameters=params)
 
 
 def get_sct_runner(cloud_provider: str, region_name: str, availability_zone: str = "") -> SctRunner:
@@ -909,15 +1020,13 @@ def get_sct_runner(cloud_provider: str, region_name: str, availability_zone: str
     raise Exception(f'Unsupported Cloud provider: `{cloud_provider}')
 
 
-def list_sct_runners(test_status: Optional[str] = None, test_runner_ip: str = None) -> list[SctRunnerInfo]:
+def list_sct_runners(test_runner_ip: str = None) -> list[SctRunnerInfo]:
     LOGGER.info("Looking for SCT runner instances...")
     sct_runner_classes = (AwsSctRunner, GceSctRunner, AzureSctRunner, )
     sct_runners = chain.from_iterable(cls.list_sct_runners() for cls in sct_runner_classes)
 
     if test_runner_ip:
         if sct_runner_info := next((runner for runner in sct_runners if test_runner_ip in runner.public_ips), None):
-            if test_status == "SUCCESS":
-                sct_runner_info.keep = None  # force SCT Runner termination
             sct_runners = [sct_runner_info, ]
         else:
             LOGGER.warning("No SCT Runners found to remove (IP: %s)", test_runner_ip)
@@ -930,39 +1039,104 @@ def list_sct_runners(test_status: Optional[str] = None, test_runner_ip: str = No
     return sct_runners
 
 
-def clean_sct_runners(test_status: Optional[str] = None, test_runner_ip: str = None, dry_run: bool = False) -> None:
-    utc_now = datetime.datetime.now(tz=datetime.timezone.utc)
-    LOGGER.info("UTC now: %s", utc_now)
+def update_sct_runner_tags(test_runner_ip: str = None, test_id: str = None, tags: dict = None):
+    LOGGER.info("Test runner ip in update_sct_runner_tags: %s; test_id: %s", test_runner_ip, test_id)
+    if not test_runner_ip and not test_id:
+        raise ValueError("update_sct_runner_tags requires either the "
+                         "test_runner_ip or test_id argument to find the runner")
 
-    runners_cleaned = 0
+    runner_to_update = None
 
-    for sct_runner_info in list_sct_runners(test_status=test_status, test_runner_ip=test_runner_ip):
+    if test_runner_ip:
+        runner_to_update = list_sct_runners(test_runner_ip=test_runner_ip)
+    elif test_id:
+        listed_runners = list_sct_runners()
+        runner_to_update = [runner for runner in listed_runners if runner.test_id == test_id]
+
+    if not runner_to_update:
+        raise RuntimeError(f"Could not find SCT runner with IP: {test_runner_ip} to update tags for.")
+
+    try:
+        runner_to_update = runner_to_update[0]
+        runner_to_update.sct_runner_class.set_tags(runner_to_update, tags=tags)
+        LOGGER.info("Tags on SCT runner updated with: %s", tags)
+    except Exception as exc:  # pylint: disable=broad-except
+        LOGGER.warning("Could not set SCT runner tags to: %s due to exc:\n%s", tags, exc)
+
+
+def _manage_runner_keep_tag_value(utc_now: datetime,
+                                  timeout_flag: bool,
+                                  test_status: str,
+                                  sct_runner_info: SctRunnerInfo) -> SctRunnerInfo:
+    LOGGER.info("Managing runner's tags. Timeout flag: %s, logs_collected: %s",
+                timeout_flag, sct_runner_info.logs_collected)
+
+    if test_status == "SUCCESS" and sct_runner_info.logs_collected:
+        sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": "0", "keep-action": "terminate"})
+        sct_runner_info.keep = 0
+        sct_runner_info.keep_action = "terminate"
+        return sct_runner_info
+
+    if not timeout_flag and sct_runner_info.logs_collected:
+        current_run_time_hrs = int((utc_now - sct_runner_info.launch_time).total_seconds() // 3600)
+        new_keep_value = int(sct_runner_info.keep) - current_run_time_hrs + 6
+
+        if new_keep_value > 0:
+            sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": str(new_keep_value)})
+            sct_runner_info.keep = new_keep_value
+        return sct_runner_info
+
+    if not sct_runner_info.logs_collected:
+        sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": "alive"})
+        sct_runner_info.keep = "alive"
+
+    return sct_runner_info
+
+
+def clean_sct_runners(test_status: str,
+                      test_runner_ip: str = None,
+                      dry_run: bool = False) -> None:
+    sct_runners_list = list_sct_runners(test_runner_ip=test_runner_ip)
+    timeout_flag = False
+    end_message = ""
+
+    if sct_runners_list:
+        sct_runner_info = sct_runners_list[0]
+        LOGGER.info("Attempting to create runner remoter with host: %s, region_name: %s",
+                    test_runner_ip, sct_runner_info.region_az)
+        runner_remoter = sct_runner_info.sct_runner_class(region_name=sct_runner_info.region_az,
+                                                          availability_zone="").get_remoter(host=test_runner_ip)
+        cmd = 'cat /home/ubuntu/sct-results/latest/events_log/critical.log | grep "TestTimeoutEvent"'
+        timeout_flag = bool(runner_remoter.run(cmd, ignore_status=True).stdout)
+        utc_now = datetime.datetime.now(tz=datetime.timezone.utc)
+        LOGGER.info("UTC now: %s", utc_now)
+
+        sct_runner_info = _manage_runner_keep_tag_value(test_status=test_status, utc_now=utc_now,
+                                                        timeout_flag=timeout_flag, sct_runner_info=sct_runner_info)
         if sct_runner_info.keep:
-            if "alive" in sct_runner_info.keep:
-                LOGGER.info("Skip %s because `keep' == `alive'", sct_runner_info)
-                continue
+            if "alive" in str(sct_runner_info.keep):
+                LOGGER.info("Skip %s because `keep' == `alive. No runners have been terminated'", sct_runner_info)
+                return
             if sct_runner_info.keep_action != "terminate":
                 LOGGER.info("Skip %s because keep_action `keep_action' != `terminate'", sct_runner_info)
-                continue
+                return
             if sct_runner_info.launch_time is None:
                 LOGGER.info("Skip %s because `launch_time' is not set", sct_runner_info)
-                continue
+                return
             try:
                 if (utc_now - sct_runner_info.launch_time).total_seconds() < int(sct_runner_info.keep) * 3600:
                     LOGGER.info("Skip %s, too early to terminate", sct_runner_info)
-                    continue
+                    return
             except ValueError as exc:
                 LOGGER.warning("Value of `keep' tag is invalid: %s", exc)
         if dry_run:
             LOGGER.info("Skip %s because of dry-run", sct_runner_info)
-            continue
+            return
         try:
             sct_runner_info.terminate()
-            runners_cleaned += 1
+            end_message = "Cleaned runner: %s", sct_runner_info
         except Exception as exc:  # pylint: disable=broad-except
             LOGGER.warning("Exception raised during termination of %s: %s", sct_runner_info, exc)
+            end_message = "No runners have been terminated"
 
-    if runners_cleaned:
-        LOGGER.info("Cleaned %d runners", runners_cleaned)
-    else:
-        LOGGER.info("No runners have been terminated")
+    LOGGER.info(end_message)

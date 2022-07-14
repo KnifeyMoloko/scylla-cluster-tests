@@ -156,6 +156,7 @@ def call(Map pipelineParams) {
                                                         dir('scylla-cluster-tests') {
                                                             def test_config = groovy.json.JsonOutput.toJson(pipelineParams.test_config)
                                                             def cloud_provider = getCloudProviderFromBackend(params.backend)
+                                                            // TODO: replace gce_image_db with the current scylla gce machine image
                                                             sh """
                                                             #!/bin/bash
                                                             set -xe
@@ -193,6 +194,7 @@ def call(Map pipelineParams) {
                                                             export SCT_AMI_ID_DB_SCYLLA_DESC=\$(echo \$SCT_AMI_ID_DB_SCYLLA_DESC | tr ._ - | cut -c1-8 )
 
                                                             export SCT_GCE_IMAGE_DB=${pipelineParams.gce_image_db}
+                                                            export SCT_USE_PREINSTALLED_SCYLLA=${pipelineParams.use_preinstalled_scylla}
                                                             export SCT_SCYLLA_LINUX_DISTRO=${pipelineParams.linux_distro}
                                                             export SCT_AMI_ID_DB_SCYLLA_DESC="\$SCT_AMI_ID_DB_SCYLLA_DESC-\$SCT_SCYLLA_LINUX_DISTRO"
 

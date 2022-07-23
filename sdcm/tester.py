@@ -678,6 +678,9 @@ class ClusterTester(db_stats.TestStatsMixin, unittest.TestCase):  # pylint: disa
             if self.params.get('use_legacy_cluster_init'):
                 self.legacy_init_nodes(db_cluster=db_cluster)
             else:
+                self.log.info("Initiating nodes...")
+                self.db_cluster.nodes[0].list_users()
+                self.db_cluster.nodes[0].lsof()
                 self.init_nodes(db_cluster=db_cluster)
 
             if self.params.get('use_ldap'):

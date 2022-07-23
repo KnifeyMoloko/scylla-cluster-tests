@@ -2973,6 +2973,16 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         result = self.remoter.run('/sbin/ip -o link show |grep ether |awk -F": " \'{print $2}\'', verbose=True)
         return result.stdout.strip().split()
 
+    def list_users(self):
+        list_users_command = "cat /etc/passwd"
+        response = self.remoter.sudo(cmd=list_users_command)
+        self.log.info("List users command response:\n%s", response)
+
+    def lsof(self):
+        lsof_command = "lsof -n -i4TCP"
+        response = self.remoter.sudo(cmd=lsof_command)
+        self.log.info("Lsof command response:\n%s", response)
+
 
 class FlakyRetryPolicy(RetryPolicy):
 

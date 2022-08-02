@@ -165,6 +165,9 @@ class UpgradeTest(FillDatabaseData):
         result = node.remoter.run('scylla --version')
         self.orig_ver = result.stdout
 
+        cpu_set_before = node.cpuset
+        self.log.info("CPUSET on node BEFORE %s:\n%s", node.name, cpu_set_before)
+
         if upgrade_node_packages:
             # update_scylla_packages
             node.remoter.send_files(upgrade_node_packages, '/tmp/scylla', verbose=True)
@@ -233,6 +236,10 @@ class UpgradeTest(FillDatabaseData):
                     node.remoter.run(
                         r'sudo apt-get dist-upgrade {} -y '
                         r'-o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" '.format(scylla_pkg))
+
+        cpu_set_after = node.cpuset
+        self.log.info("CPUSET on node AFTER %s:\n%s", node.name, cpu_set_after)
+
         if self.params.get('test_sst3'):
             node.remoter.run("echo 'enable_sstables_mc_format: true' |sudo tee --append /etc/scylla/scylla.yaml")
         if self.params.get('test_upgrade_from_installed_3_1_0'):

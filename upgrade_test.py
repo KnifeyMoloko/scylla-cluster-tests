@@ -165,8 +165,7 @@ class UpgradeTest(FillDatabaseData):
         result = node.remoter.run('scylla --version')
         self.orig_ver = result.stdout
 
-        cpu_set_before = node.cpuset
-        self.log.info("CPUSET on node BEFORE %s:\n%s", node.name, cpu_set_before)
+        self.log.info("CPUSET on node BEFORE %s:\n%s", node.name, node.cpuset)
 
         if upgrade_node_packages:
             # update_scylla_packages
@@ -237,8 +236,7 @@ class UpgradeTest(FillDatabaseData):
                         r'sudo apt-get dist-upgrade {} -y '
                         r'-o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" '.format(scylla_pkg))
 
-        cpu_set_after = node.cpuset
-        self.log.info("CPUSET on node AFTER %s:\n%s", node.name, cpu_set_after)
+        self.log.info("CPUSET on node AFTER %s:\n%s", node.name, node.cpuset)
 
         if self.params.get('test_sst3'):
             node.remoter.run("echo 'enable_sstables_mc_format: true' |sudo tee --append /etc/scylla/scylla.yaml")
@@ -581,7 +579,6 @@ class UpgradeTest(FillDatabaseData):
                 metric_query='gemini_cql_requests', n=10)
 
         with ignore_upgrade_schema_errors():
-
             step = 'Step1 - Upgrade First Node '
             InfoEvent(message=step).publish()
             # upgrade first node

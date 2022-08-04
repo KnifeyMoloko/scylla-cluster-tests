@@ -2217,6 +2217,9 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
             self.remoter.run('sudo /usr/lib/scylla/scylla_setup --nic {} --disks {} --setup-nic-and-disks {}'
                              .format(devname, ','.join(disks), extra_setup_args))
 
+        # sysconfig_result = self.remoter.run(cmd=f"sudo scylla_sysconfig_setup --nic {devname} "
+        #                                     f"--homedir /var/lib/scylla --confdir /etc/scylla.d")
+
         result = self.remoter.run('cat /proc/mounts')
         assert ' /var/lib/scylla ' in result.stdout, "RAID setup failed, scylla directory isn't mounted correctly"
         self.remoter.run('sudo sync')

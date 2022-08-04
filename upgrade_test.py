@@ -234,28 +234,6 @@ class UpgradeTest(FillDatabaseData):
                         r'sudo apt-get dist-upgrade {} -y '
                         r'-o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" '.format(scylla_pkg))
 
-        def get_new_cpuset_config_and_cat_it():
-            # backup the current cpuset and perftune config
-            node.remoter.run("sudo mv /etc/scylla.d/cpuset.conf /etc/scylla.d/cpuset.conf.old", ignore_status=True)
-            node.remoter.run("sudo mv /etc/scylla.d/perftune.yaml /etc/scylla.d/perftune.yaml.old", ignore_status=True)
-
-            # cat the files
-            node.remoter.run("cat /etc/scylla.d/cpuset.conf", ignore_result=True)
-            node.remoter.run("cat /etc/scylla.d/perftune.yaml", ignore_result=True)
-
-            # create new config using scylla_sysconfig_setup
-            node.remoter.run(f"sudo scylla_sysconfig_setup --nic eth5 --homedir /var/lib/scylla --confdir /etc/scylla",
-                             ignore_status=True)
-
-            # compare the changes
-            diff_cpuset_result = node.remoter.run("diff -s /etc/scylla.d/cpuset.conf.old /etc/scylla.d/cpuset.conf", ignore_status=True)
-            diff_perftune_result = node.remoter.run("diff -s /etc/scylla.d/perftune.yaml /etc/scylla.d/perftune.yaml.old", ignore_status=True)
-
-            self.log.info(f"CPUSET diff result:\n{diff_cpuset_result}")
-            self.log.info(f"CPUSET perftune result:\n{diff_perftune_result}")
-
-        get_new_cpuset_config_and_cat_it()
-
         if self.params.get('test_sst3'):
             node.remoter.run("echo 'enable_sstables_mc_format: true' |sudo tee --append /etc/scylla/scylla.yaml")
         if self.params.get('test_upgrade_from_installed_3_1_0'):
@@ -597,6 +575,7 @@ class UpgradeTest(FillDatabaseData):
                 metric_query='gemini_cql_requests', n=10)
 
         with ignore_upgrade_schema_errors():
+
             step = 'Step1 - Upgrade First Node '
             InfoEvent(message=step).publish()
             # upgrade first node

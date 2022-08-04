@@ -2217,14 +2217,15 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
             self.remoter.run('sudo /usr/lib/scylla/scylla_setup --nic {} --disks {} --setup-nic-and-disks {}'
                              .format(devname, ','.join(disks), extra_setup_args))
 
-        # sysconfig_result = self.remoter.run(cmd=f"sudo scylla_sysconfig_setup --nic {devname} "
-        #                                     f"--homedir /var/lib/scylla --confdir /etc/scylla.d")
-
         result = self.remoter.run('cat /proc/mounts')
         assert ' /var/lib/scylla ' in result.stdout, "RAID setup failed, scylla directory isn't mounted correctly"
         self.remoter.run('sudo sync')
         self.log.info('io.conf right after setup')
         self.remoter.run('sudo cat /etc/scylla.d/io.conf')
+        self.log.info("perftune.yaml right after setup")
+        self.remoter.run('sudo cat /etc/scylla.d/perftune.yaml', ignore_status=True)
+        self.log.info("cpuset.conf right after setup")
+        self.remoter.run('sudo cat /etc/scylla.d/cpuset.conf', ignore_status=True)
 
         if not self.is_ubuntu14():
             self.remoter.run('sudo systemctl enable scylla-server.service')
@@ -4220,6 +4221,14 @@ class BaseScyllaCluster:  # pylint: disable=too-many-public-methods, too-many-in
         check_nodes_status(nodes_status=nodes_status, current_node=node)
 
         self.clean_replacement_node_ip(node)
+
+    def run_scylla_sysconfig_setup(self):
+        for node in self.nodes:
+            node.run_scylla_sysconfig_setup()
+
+    def run_perftune(self):
+        for node in self.nodes:
+            node.run_perftune()
 
     def install_scylla_manager(self, node):
         pkgs_url = self.params.get("scylla_mgmt_pkg")

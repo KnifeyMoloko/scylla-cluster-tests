@@ -633,6 +633,14 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         return ''
 
     @property
+    def perftune_yaml(self):
+        """Get the perftune.yaml from /etc/scylla.d/"""
+        if self.is_nonroot_install:  # perftune will not be run in nonroot install
+            return None
+        grep_result = self.remoter.run("cat /etc/scylla.d/perftune.yaml", ignore_status=True)
+        return grep_result
+
+    @property
     def smp(self):
         """
         Example of SCYLLA_ARGS:
@@ -2191,6 +2199,7 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         TestConfig scylla
         :param disks: list of disk names
         """
+        self.log.info("Running scylla setup...")
         extra_setup_args = self.parent_cluster.params.get('append_scylla_setup_args')
         result = self.remoter.run('sudo /usr/lib/scylla/scylla_setup --help')
         if '--swap-directory' in result.stdout:

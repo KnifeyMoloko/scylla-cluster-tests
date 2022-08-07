@@ -160,6 +160,12 @@ class UpgradeTest(FillDatabaseData):
         InfoEvent(message='Upgrading a Node').publish()
         node.upgrade_system()
 
+        InfoEvent("The pre-upgrade perftune values are:").publish()
+        result = node.remoter.run("cat /etc/scylla.d/perftune.yaml")
+        self.log.info("Perftune before upgrade:\nstdout: %s\nstderr: %s", result.stdout, result.stderr)
+        InfoEvent("The pre-upgrade cpuset values are:").publish()
+        self.log.info("CPUSET: %s", node.cpuset)
+
         # We assume that if update_db_packages is not empty we install packages from there.
         # In this case we don't use upgrade based on new_scylla_repo(ignored sudo yum update scylla...)
         result = node.remoter.run('scylla --version')
@@ -248,6 +254,11 @@ class UpgradeTest(FillDatabaseData):
         node.start_scylla_server(verify_up_timeout=500)
         result = node.remoter.run('scylla --version')
         new_ver = result.stdout
+        InfoEvent("The post-upgrade perftune values are:")
+        result = node.remoter.run("cat /etc/scylla.d/perftune.yaml")
+        self.log.info("Perftune after upgrade:\nstdout: %s\nstderr: %s", result.stdout, result.stderr)
+        InfoEvent("The post-upgrade cpuset values are:")
+        self.log.info("CPUSET: %s", node.cpuset)
         assert self.orig_ver != new_ver, "scylla-server version isn't changed"
         self.new_ver = new_ver
         self._update_argus_upgraded_version(node, new_ver)
@@ -509,6 +520,20 @@ class UpgradeTest(FillDatabaseData):
         we want to use this case to verify the read (cl=ALL) workload works
         well, upgrade all nodes to new version in the end.
         """
+        def _get_perftune_values(msg: str = ""):
+            cpuset_values = {}
+            perftune_values = {}
+
+            InfoEvent("%s : Getting CPUSET and perftune.yaml...")
+            for node in self.db_cluster.nodes:
+                cpuset_values.update({node.name: node.cpuset})
+                perftune_response = node.remoter.run(cmd="cat /etc/scylla.d/perftune.yaml",
+                                                                    ignore_status=True)
+                perftune_values.update({node.name: [perftune_response.stdout, perftune_response.stderr]})
+
+            self.log.info("%s CPUSET: %s", msg, cpuset_values)
+            self.log.info("%s Perftune: %s", msg, perftune_values)
+
         # In case the target version >= 3.1 we need to perform test for truncate entries
         target_upgrade_version = self.params.get('target_upgrade_version')
         self.truncate_entries_flag = False
@@ -574,6 +599,9 @@ class UpgradeTest(FillDatabaseData):
             self.metric_has_data(
                 metric_query='gemini_cql_requests', n=10)
 
+        # query cpuset and perftune values
+        _get_perftune_values(msg="Prepare")
+
         with ignore_upgrade_schema_errors():
 
             step = 'Step1 - Upgrade First Node '
@@ -584,6 +612,9 @@ class UpgradeTest(FillDatabaseData):
             self.upgrade_node(self.db_cluster.node_to_upgrade)
             InfoEvent(message='Upgrade Node %s ended' % self.db_cluster.node_to_upgrade.name).publish()
             self.db_cluster.node_to_upgrade.check_node_health()
+
+            # query cpuset and perftune values
+            _get_perftune_values(msg="Step 1")
 
             # wait for the prepare write workload to finish
             self.verify_stress_thread(prepare_write_cs_thread_pool)
@@ -615,6 +646,9 @@ class UpgradeTest(FillDatabaseData):
             InfoEvent(message='Upgrade Node %s ended' % self.db_cluster.node_to_upgrade.name).publish()
             self.db_cluster.node_to_upgrade.check_node_health()
 
+            # query cpuset and perftune values
+            _get_perftune_values(msg="Step 2")
+
             # wait for the 10m read workload to finish
             self.verify_stress_thread(read_10m_cs_thread_pool)
             self.fill_and_verify_db_data('after upgraded two nodes')
@@ -635,6 +669,9 @@ class UpgradeTest(FillDatabaseData):
             InfoEvent(message='Rollback Node %s ended' % self.db_cluster.nodes[indexes[1]].name).publish()
             self.db_cluster.nodes[indexes[1]].check_node_health()
 
+            # query cpuset and perftune values
+            _get_perftune_values(msg="Step 3")
+
         step = 'Step4 - Verify data during mixed cluster mode '
         InfoEvent(message=step).publish()
         self.fill_and_verify_db_data('after rollback the second node')
@@ -642,6 +679,9 @@ class UpgradeTest(FillDatabaseData):
         self.db_cluster.nodes[indexes[0]].run_nodetool(sub_cmd='repair')
         self.search_for_idx_token_error_after_upgrade(node=self.db_cluster.node_to_upgrade,
                                                       step=step)
+
+        # query cpuset and perftune values
+        _get_perftune_values(msg="Step 4")
 
         with ignore_upgrade_schema_errors():
 
@@ -656,6 +696,9 @@ class UpgradeTest(FillDatabaseData):
                 self.fill_and_verify_db_data('after upgraded %s' % self.db_cluster.node_to_upgrade.name)
                 self.search_for_idx_token_error_after_upgrade(node=self.db_cluster.node_to_upgrade,
                                                               step=step)
+
+        # query cpuset and perftune values
+        _get_perftune_values(msg="Step 4")
 
         InfoEvent(message='Step6 - Verify stress results after upgrade ').publish()
         InfoEvent(message='Waiting for stress threads to complete after upgrade').publish()

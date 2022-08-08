@@ -40,6 +40,7 @@ from libcloud.compute.base import Node
 from mypy_boto3_ec2 import EC2Client
 from mypy_boto3_ec2.service_resource import Instance
 
+from sct_ssh import _ssh_run_cmd
 from sdcm.keystore import KeyStore
 from sdcm.provision.provisioner import InstanceDefinition, PricingModel, VmInstance, provisioner_factory
 from sdcm.remote import RemoteCmdRunnerBase, shell_script_cmd
@@ -1086,10 +1087,13 @@ def _manage_runner_keep_tag_value(utc_now: datetime,
             sct_runner_info.keep = new_keep_value
         return sct_runner_info
 
-    if not sct_runner_info.logs_collected:
-        sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": "alive"})
+    if test_status is not None and test_status != "RUNNING" and not sct_runner_info.logs_collected:
+        sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": "alive", "keep_action": "keep"})
         sct_runner_info.keep = "alive"
+        sct_runner_info.keep_action = "keep"
+        return sct_runner_info
 
+    LOGGER.info("No changes to make to runner tags.")
     return sct_runner_info
 
 
@@ -1098,16 +1102,19 @@ def clean_sct_runners(test_status: str,
                       dry_run: bool = False) -> None:
     sct_runners_list = list_sct_runners(test_runner_ip=test_runner_ip)
     timeout_flag = False
+    runners_terminated = 0
     end_message = ""
 
-    if sct_runners_list:
-        sct_runner_info = sct_runners_list[0]
+    for sct_runner_info in sct_runners_list:
         LOGGER.info("Attempting to create runner remoter with host: %s, region_name: %s",
                     test_runner_ip, sct_runner_info.region_az)
-        runner_remoter = sct_runner_info.sct_runner_class(region_name=sct_runner_info.region_az,
-                                                          availability_zone="").get_remoter(host=test_runner_ip)
         cmd = 'cat /home/ubuntu/sct-results/latest/events_log/critical.log | grep "TestTimeoutEvent"'
-        timeout_flag = bool(runner_remoter.run(cmd, ignore_status=True).stdout)
+        if sct_runner_info.cloud_provider == "aws":
+            sct_runner_name = sct_runner_info.instance_name.split(" ")[0]
+        else:
+            sct_runner_name = sct_runner_info.instance_name
+        timeout_flag = bool(_ssh_run_cmd(command=cmd, test_id=sct_runner_info.test_id,
+                                         node_name=sct_runner_name).stdout)
         utc_now = datetime.datetime.now(tz=datetime.timezone.utc)
         LOGGER.info("UTC now: %s", utc_now)
 
@@ -1134,7 +1141,8 @@ def clean_sct_runners(test_status: str,
             return
         try:
             sct_runner_info.terminate()
-            end_message = "Cleaned runner: %s", sct_runner_info
+            runners_terminated += 1
+            end_message = f"Number of cleaned runners: {runners_terminated}"
         except Exception as exc:  # pylint: disable=broad-except
             LOGGER.warning("Exception raised during termination of %s: %s", sct_runner_info, exc)
             end_message = "No runners have been terminated"

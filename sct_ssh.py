@@ -178,6 +178,41 @@ def ssh(user, test_id, region, force_use_public_ip, node_name):
         pty.spawn(shlex.split(cmd))
 
 
+@click.command("ssh-cmd")
+@click.option("-u", "--user", default=None,
+              help="User to search for (RunByUser tag)")
+@click.option("-t", "--test-id", default=None, help="test id to search for")
+@click.option("-r", "--region", default=None, help="region to use, default search across all regions")
+@click.option("-P", "--force-use-public-ip", is_flag=True, show_default=True, default=False,
+              help="Force usage of public address")
+@click.argument("node_name", required=False)
+@click.argument("command", required=True)
+def ssh_run_cmd(user, test_id, region, force_use_public_ip, node_name, command):
+    return _ssh_run_cmd(node_name, command, user, test_id, region, force_use_public_ip)
+
+
+def _ssh_run_cmd(node_name: str, command: str, user: str = None,
+                 test_id: str = None, region: str = None,
+                 force_use_public_ip: bool = None) -> subprocess.CompletedProcess | None:
+    assert user or test_id or (node_name and command)
+    connect_vm = select_instance(region=region, test_id=test_id, user=user, node_name=node_name)
+    cmd_out = None
+
+    if connect_vm:
+        proxy_command, target_ip, target_username = get_proxy_command(connect_vm, force_use_public_ip)
+        click.echo(click.style(f"run command {command} via ssh into: {get_tags(connect_vm).get('Name')}",
+                               fg='green', bold=True))
+
+        cmd = (f'ssh {proxy_command}'
+               f' -i ~/.ssh/scylla-qa-ec2 -o UserKnownHostsFile=/dev/null '
+               f'-o StrictHostKeyChecking=no -o ServerAliveInterval=10 {target_username}@{target_ip} '
+               f'{command}')
+        click.echo(cmd)
+        cmd_out = subprocess.run(cmd, shell=True, capture_output=True, check=False)
+        click.echo(f"cmd_out: {cmd_out}")
+    return cmd_out
+
+
 @click.command("tunnel", help="Tunnel ports to any SCT machine on AWS")
 @click.option("-u", "--user", default=None,
               help="User to search for (RunByUser tag)")

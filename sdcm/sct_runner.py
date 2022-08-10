@@ -628,7 +628,7 @@ class AwsSctRunner(SctRunner):
                  tags: dict) -> None:
         tags_to_create = []
         for key, value in tags.items():
-            tags_to_create.append({"Key": key, "Value": value})
+            tags_to_create.append({"Key": str(key), "Value": str(value)})
 
         cloud_instance: EC2Client = sct_runner_info.cloud_service_instance
         # extract instance id from SctRunner.instance_name, e.g. sct-runner-1.5-instance-81d39f6f (i-02e72ea7f5aac9d65)

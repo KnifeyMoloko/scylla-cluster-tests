@@ -40,7 +40,7 @@ from libcloud.compute.base import Node
 from mypy_boto3_ec2 import EC2Client
 from mypy_boto3_ec2.service_resource import Instance
 
-from sct_ssh import _ssh_run_cmd
+from sct_ssh import ssh_run_cmd
 from sdcm.keystore import KeyStore
 from sdcm.provision.provisioner import InstanceDefinition, PricingModel, VmInstance, provisioner_factory
 from sdcm.remote import RemoteCmdRunnerBase, shell_script_cmd
@@ -1068,12 +1068,14 @@ def update_sct_runner_tags(test_runner_ip: str = None, test_id: str = None, tags
 def _manage_runner_keep_tag_value(utc_now: datetime,
                                   timeout_flag: bool,
                                   test_status: str,
-                                  sct_runner_info: SctRunnerInfo) -> SctRunnerInfo:
-    LOGGER.info("Managing runner's tags. Timeout flag: %s, logs_collected: %s",
-                timeout_flag, sct_runner_info.logs_collected)
+                                  sct_runner_info: SctRunnerInfo,
+                                  dry_run: bool = False) -> SctRunnerInfo:
+    LOGGER.info("Managing runner's tags. Timeout flag: %s, logs_collected: %s, dry_run: %s",
+                timeout_flag, sct_runner_info.logs_collected, dry_run)
 
     if test_status == "SUCCESS" and sct_runner_info.logs_collected:
-        sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": "0", "keep-action": "terminate"})
+        if not dry_run:
+            sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": "0", "keep-action": "terminate"})
         sct_runner_info.keep = 0
         sct_runner_info.keep_action = "terminate"
         return sct_runner_info
@@ -1083,12 +1085,14 @@ def _manage_runner_keep_tag_value(utc_now: datetime,
         new_keep_value = int(sct_runner_info.keep) - current_run_time_hrs + 6
 
         if new_keep_value > 0:
-            sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": str(new_keep_value)})
+            if not dry_run:
+                sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": str(new_keep_value)})
             sct_runner_info.keep = new_keep_value
         return sct_runner_info
 
     if test_status is not None and test_status != "RUNNING" and not sct_runner_info.logs_collected:
-        sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": "alive", "keep_action": "keep"})
+        if not dry_run:
+            sct_runner_info.sct_runner_class.set_tags(sct_runner_info, {"keep": "alive", "keep_action": "keep"})
         sct_runner_info.keep = "alive"
         sct_runner_info.keep_action = "keep"
         return sct_runner_info
@@ -1100,45 +1104,56 @@ def _manage_runner_keep_tag_value(utc_now: datetime,
 def clean_sct_runners(test_status: str,
                       test_runner_ip: str = None,
                       dry_run: bool = False) -> None:
+    # pylint: disable=too-many-branches
     sct_runners_list = list_sct_runners(test_runner_ip=test_runner_ip)
     timeout_flag = False
     runners_terminated = 0
     end_message = ""
 
+    if test_runner_ip:
+        sct_runners_list = [sct_runner for sct_runner in sct_runners_list if test_runner_ip in sct_runner.public_ips]
+
     for sct_runner_info in sct_runners_list:
-        LOGGER.info("Attempting to create runner remoter with host: %s, region_name: %s",
-                    test_runner_ip, sct_runner_info.region_az)
+        LOGGER.info("Managing SCT runner: %s in region: %s",
+                    sct_runner_info.instance_name, sct_runner_info.region_az)
         cmd = 'cat /home/ubuntu/sct-results/latest/events_log/critical.log | grep "TestTimeoutEvent"'
+
         if sct_runner_info.cloud_provider == "aws":
             sct_runner_name = sct_runner_info.instance_name.split(" ")[0]
         else:
             sct_runner_name = sct_runner_info.instance_name
-        timeout_flag = bool(_ssh_run_cmd(command=cmd, test_id=sct_runner_info.test_id,
-                                         node_name=sct_runner_name).stdout)
+
+        ssh_run_cmd_result = ssh_run_cmd(command=cmd, test_id=sct_runner_info.test_id,
+                                         node_name=sct_runner_name)
+        timeout_flag = bool(ssh_run_cmd_result.stdout) if ssh_run_cmd_result else False
         utc_now = datetime.datetime.now(tz=datetime.timezone.utc)
         LOGGER.info("UTC now: %s", utc_now)
 
-        sct_runner_info = _manage_runner_keep_tag_value(test_status=test_status, utc_now=utc_now,
-                                                        timeout_flag=timeout_flag, sct_runner_info=sct_runner_info)
+        if not dry_run and test_runner_ip:
+            sct_runner_info = _manage_runner_keep_tag_value(test_status=test_status, utc_now=utc_now,
+                                                            timeout_flag=timeout_flag, sct_runner_info=sct_runner_info,
+                                                            dry_run=dry_run)
+
         if sct_runner_info.keep:
             if "alive" in str(sct_runner_info.keep):
                 LOGGER.info("Skip %s because `keep' == `alive. No runners have been terminated'", sct_runner_info)
-                return
+                continue
             if sct_runner_info.keep_action != "terminate":
                 LOGGER.info("Skip %s because keep_action `keep_action' != `terminate'", sct_runner_info)
-                return
+                continue
             if sct_runner_info.launch_time is None:
                 LOGGER.info("Skip %s because `launch_time' is not set", sct_runner_info)
-                return
+                continue
             try:
                 if (utc_now - sct_runner_info.launch_time).total_seconds() < int(sct_runner_info.keep) * 3600:
                     LOGGER.info("Skip %s, too early to terminate", sct_runner_info)
-                    return
+                    continue
             except ValueError as exc:
                 LOGGER.warning("Value of `keep' tag is invalid: %s", exc)
+
         if dry_run:
             LOGGER.info("Skip %s because of dry-run", sct_runner_info)
-            return
+            continue
         try:
             sct_runner_info.terminate()
             runners_terminated += 1

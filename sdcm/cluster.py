@@ -633,14 +633,6 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         return ''
 
     @property
-    def perftune_yaml(self):
-        """Get the perftune.yaml from /etc/scylla.d/"""
-        if self.is_nonroot_install:  # perftune will not be run in nonroot install
-            return None
-        grep_result = self.remoter.run("cat /etc/scylla.d/perftune.yaml", ignore_status=True)
-        return grep_result
-
-    @property
     def smp(self):
         """
         Example of SCYLLA_ARGS:
@@ -2199,7 +2191,6 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         TestConfig scylla
         :param disks: list of disk names
         """
-        self.log.info("Running scylla setup...")
         extra_setup_args = self.parent_cluster.params.get('append_scylla_setup_args')
         result = self.remoter.run('sudo /usr/lib/scylla/scylla_setup --help')
         if '--swap-directory' in result.stdout:
@@ -2948,6 +2939,45 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         """Returns list of ethernet network interfaces"""
         result = self.remoter.run('/sbin/ip -o link show |grep ether |awk -F": " \'{print $2}\'', verbose=True)
         return result.stdout.strip().split()
+
+    def run_scylla_sysconfig_setup(self):
+        """
+        Run the scylla_sysconfig_setup script that
+        sets the values in /etc/scylla.d for:
+        - cpuset.conf
+        - perftune.yaml
+        These values are used by Scylla to decide
+        on how to balance rx queues with the logical
+        core number.
+
+        A restart is required if the previous values
+        of the config files were different from the
+        new ones. Note: this might trigger a
+        resharding in Scylla.
+        """
+        # backup old config if it exists
+        self.log.info("Backing up current config files before running scylla_sysconfig setup...")
+        self.remoter.run("cp /etc/scylla.d/cpuset.conf /etc/scylla.d/cpuset.conf.old", ignore_status=True)
+        self.remoter.run("cp /etc/scylla.d/perftune.yaml /etc/scylla.d/perftune.yaml.old", ignore_status=True)
+
+        # run as sudo scylla_sysconfig_setup
+        self.log.info("Running scylla_sysconfig_setup as sudo...")
+        nic_name = self.get_nic_devices()[0]
+        self.remoter.sudo(f"scylla_sysconfig_setup --nic {nic_name} --homedir /var/lib/scylla --confdir /etc/scylla")
+
+        # compare old output witn new in scylla.d
+        self.log.info("Comparing old config files vs new ones after running scylla_sysconfig_setup...")
+        cpuset_diff = self.remoter.run(
+            "diff /etc/scylla.d/cpuset.conf /etc/scylla.d/cpuset.conf.old", ignore_status=True).stdout
+        perftune_diff = self.remoter.run(
+            "diff /etc/scylla.d/perftune.yaml /etc/scylla.d/perftune.yaml.old", ignore_status=True).stdout
+
+        if cpuset_diff or perftune_diff:
+            self.log.info("Draining and restarting the node after running scylla_sysconfig_setup "
+                          "for the changes to be picked up by Scylla.")
+            self.run_nodetool("drain")
+            self.restart_scylla(verify_up_after=True)
+        self.log.info("Finished running scylla_sysconfig_setup.")
 
 
 class FlakyRetryPolicy(RetryPolicy):
@@ -4230,14 +4260,6 @@ class BaseScyllaCluster:  # pylint: disable=too-many-public-methods, too-many-in
         check_nodes_status(nodes_status=nodes_status, current_node=node)
 
         self.clean_replacement_node_ip(node)
-
-    def run_scylla_sysconfig_setup(self):
-        for node in self.nodes:
-            node.run_scylla_sysconfig_setup()
-
-    def run_perftune(self):
-        for node in self.nodes:
-            node.run_perftune()
 
     def install_scylla_manager(self, node):
         pkgs_url = self.params.get("scylla_mgmt_pkg")

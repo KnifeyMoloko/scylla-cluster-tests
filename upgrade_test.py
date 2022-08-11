@@ -151,7 +151,7 @@ class UpgradeTest(FillDatabaseData):
     @truncate_entries
     @decorate_with_context(ignore_abort_requested_errors)
     # https://github.com/scylladb/scylla/issues/10447#issuecomment-1194155163
-    def upgrade_node(self, node, upgrade_sstables=True):
+    def upgrade_node(self, node: BaseNode, upgrade_sstables=True):
         # pylint: disable=too-many-branches,too-many-statements
         new_scylla_repo = self.params.get('new_scylla_repo')
         new_version = self.params.get('new_version')
@@ -159,12 +159,6 @@ class UpgradeTest(FillDatabaseData):
 
         InfoEvent(message='Upgrading a Node').publish()
         node.upgrade_system()
-
-        InfoEvent("The pre-upgrade perftune values are:").publish()
-        result = node.remoter.run("cat /etc/scylla.d/perftune.yaml")
-        self.log.info("Perftune before upgrade:\nstdout: %s\nstderr: %s", result.stdout, result.stderr)
-        InfoEvent("The pre-upgrade cpuset values are:").publish()
-        self.log.info("CPUSET: %s", node.cpuset)
 
         # We assume that if update_db_packages is not empty we install packages from there.
         # In this case we don't use upgrade based on new_scylla_repo(ignored sudo yum update scylla...)
@@ -251,14 +245,9 @@ class UpgradeTest(FillDatabaseData):
         check_reload_systemd_config(node)
         # Current default 300s aren't enough for upgrade test of Debian 9.
         # Related issue: https://github.com/scylladb/scylla-cluster-tests/issues/1726
-        node.start_scylla_server(verify_up_timeout=500)
+        node.run_scylla_sysconfig_setup()
         result = node.remoter.run('scylla --version')
         new_ver = result.stdout
-        InfoEvent("The post-upgrade perftune values are:")
-        result = node.remoter.run("cat /etc/scylla.d/perftune.yaml")
-        self.log.info("Perftune after upgrade:\nstdout: %s\nstderr: %s", result.stdout, result.stderr)
-        InfoEvent("The post-upgrade cpuset values are:")
-        self.log.info("CPUSET: %s", node.cpuset)
         assert self.orig_ver != new_ver, "scylla-server version isn't changed"
         self.new_ver = new_ver
         self._update_argus_upgraded_version(node, new_ver)
@@ -268,7 +257,7 @@ class UpgradeTest(FillDatabaseData):
     @truncate_entries
     @decorate_with_context(ignore_abort_requested_errors)
     # https://github.com/scylladb/scylla/issues/10447#issuecomment-1194155163
-    def rollback_node(self, node, upgrade_sstables=True):
+    def rollback_node(self, node: BaseNode, upgrade_sstables=True):
         # pylint: disable=too-many-branches,too-many-statements
 
         InfoEvent(message='Rollbacking a Node').publish()
@@ -341,6 +330,7 @@ class UpgradeTest(FillDatabaseData):
             node.remoter.run('sudo sed -i -e "s/authorizer:/#authorizer:/g" /etc/scylla/scylla.yaml')
         # Current default 300s aren't enough for upgrade test of Debian 9.
         # Related issue: https://github.com/scylladb/scylla-cluster-tests/issues/1726
+        node.run_scylla_sysconfig_setup()
         node.start_scylla_server(verify_up_timeout=500)
         result = node.remoter.run('scylla --version')
         new_ver = result.stdout
@@ -528,7 +518,7 @@ class UpgradeTest(FillDatabaseData):
             for node in self.db_cluster.nodes:
                 cpuset_values.update({node.name: node.cpuset})
                 perftune_response = node.remoter.run(cmd="cat /etc/scylla.d/perftune.yaml",
-                                                                    ignore_status=True)
+                                                     ignore_status=True)
                 perftune_values.update({node.name: [perftune_response.stdout, perftune_response.stderr]})
 
             self.log.info("%s CPUSET: %s", msg, cpuset_values)

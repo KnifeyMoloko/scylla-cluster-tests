@@ -3359,15 +3359,3 @@ class ClusterTester(db_stats.TestStatsMixin, unittest.TestCase):  # pylint: disa
             if "type=ShardAwareDriver" in event_str:
                 return True
         return False
-
-    def run_scylla_sysconfig_setup_on_db_nodes(self):
-        # TODO: make this into a continuous event
-        InfoEvent("Running scylla_sysconfig_setup on db nodes...")
-        self.db_cluster.run_scylla_sysconfig_setup()
-        InfoEvent("Finished running scylla_sysconfig_setup on db nodes...")
-
-    def run_perftune_on_db_nodes(self):
-        # TODO: make this into a continous event
-        InfoEvent("Running perftune on all db nodes...")
-        self.db_cluster.run_perftune()
-        InfoEvent("Running perftune on all db nodes...")

@@ -114,3 +114,4 @@ InstanceStatusEvent.POWER_OFF: WARNING
 CompactionEvent: NORMAL
 ScyllaHousekeepingServiceEvent: ERROR
 GceInstanceEvent: ERROR
+ScyllaSysconfigSetupEvent: NORMAL

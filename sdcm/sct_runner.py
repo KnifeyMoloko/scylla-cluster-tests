@@ -1110,9 +1110,6 @@ def clean_sct_runners(test_status: str,
     runners_terminated = 0
     end_message = ""
 
-    if test_runner_ip:
-        sct_runners_list = [sct_runner for sct_runner in sct_runners_list if test_runner_ip in sct_runner.public_ips]
-
     for sct_runner_info in sct_runners_list:
         LOGGER.info("Managing SCT runner: %s in region: %s",
                     sct_runner_info.instance_name, sct_runner_info.region_az)

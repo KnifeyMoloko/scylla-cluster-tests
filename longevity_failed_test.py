@@ -260,14 +260,14 @@ class LongevityTest(ClusterTester):
             self._run_all_stress_cmds(stress_queue, params)
 
         for stress in stress_queue:
-            try:
-                new_event = CassandraStressEvent(node=self.db_cluster.nodes[0])
-                new_event.begin_event()
-                raise ZeroDivisionError("ooops")
-            except ZeroDivisionError as zexc:
-                new_event.add_error([format_stress_cmd_error(zexc)])
-                new_event.publish()
-                raise zexc
+            # try:
+            #     new_event = CassandraStressEvent(node=self.db_cluster.nodes[0])
+            #     new_event.begin_event()
+            #     raise ZeroDivisionError("ooops")
+            # except ZeroDivisionError as zexc:
+            #     new_event.add_error([format_stress_cmd_error(zexc)])
+            #     new_event.publish()
+            #     raise zexc
             self.verify_stress_thread(cs_thread_pool=stress)
 
         if (stress_read_cmd or stress_cmd) and validate_partitions:

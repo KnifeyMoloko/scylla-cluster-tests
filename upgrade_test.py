@@ -23,8 +23,9 @@ import re
 from functools import wraps, cache
 from typing import List
 
-from argus.db.db_types import PackageVersion
 from pkg_resources import parse_version
+from argus.db.db_types import PackageVersion
+
 
 from sdcm import wait
 from sdcm.cluster import BaseNode
@@ -237,7 +238,7 @@ class UpgradeTest(FillDatabaseData):
         check_reload_systemd_config(node)
         # Current default 300s aren't enough for upgrade test of Debian 9.
         # Related issue: https://github.com/scylladb/scylla-cluster-tests/issues/1726
-        node.start_scylla_server(verify_up_timeout=500)
+        node.run_scylla_sysconfig_setup()
         result = node.remoter.run('scylla --version')
         new_ver = result.stdout
         assert self.orig_ver != new_ver, "scylla-server version isn't changed"
@@ -320,7 +321,7 @@ class UpgradeTest(FillDatabaseData):
             node.remoter.run('sudo sed -i -e "s/authorizer:/#authorizer:/g" /etc/scylla/scylla.yaml')
         # Current default 300s aren't enough for upgrade test of Debian 9.
         # Related issue: https://github.com/scylladb/scylla-cluster-tests/issues/1726
-        node.start_scylla_server(verify_up_timeout=500)
+        node.run_scylla_sysconfig_setup()
         result = node.remoter.run('scylla --version')
         new_ver = result.stdout
         InfoEvent(message='original scylla-server version is %s, latest: %s' % (orig_ver, new_ver)).publish()

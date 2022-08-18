@@ -2995,6 +2995,45 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
         result = self.remoter.run('/sbin/ip -o link show |grep ether |awk -F": " \'{print $2}\'', verbose=True)
         return result.stdout.strip().split()
 
+    def run_scylla_sysconfig_setup(self):
+        """
+        Run the scylla_sysconfig_setup script that
+        sets the values in /etc/scylla.d for:
+        - cpuset.conf
+        - perftune.yaml
+        These values are used by Scylla to decide
+        on how to balance rx queues with the logical
+        core number.
+
+        A restart is required if the previous values
+        of the config files were different from the
+        new ones. Note: this might trigger a
+        resharding in Scylla.
+        """
+        # backup old config if it exists
+        self.log.info("Backing up current config files before running scylla_sysconfig setup...")
+        self.remoter.run("cp /etc/scylla.d/cpuset.conf /etc/scylla.d/cpuset.conf.old", ignore_status=True)
+        self.remoter.run("cp /etc/scylla.d/perftune.yaml /etc/scylla.d/perftune.yaml.old", ignore_status=True)
+
+        # run as sudo scylla_sysconfig_setup
+        self.log.info("Running scylla_sysconfig_setup as sudo...")
+        nic_name = self.get_nic_devices()[0]
+        self.remoter.sudo(f"scylla_sysconfig_setup --nic {nic_name} --homedir /var/lib/scylla --confdir /etc/scylla")
+
+        # compare old output witn new in scylla.d
+        self.log.info("Comparing old config files vs new ones after running scylla_sysconfig_setup...")
+        cpuset_diff = self.remoter.run(
+            "diff /etc/scylla.d/cpuset.conf /etc/scylla.d/cpuset.conf.old", ignore_status=True).stdout
+        perftune_diff = self.remoter.run(
+            "diff /etc/scylla.d/perftune.yaml /etc/scylla.d/perftune.yaml.old", ignore_status=True).stdout
+
+        if cpuset_diff or perftune_diff:
+            self.log.info("Draining and restarting the node after running scylla_sysconfig_setup "
+                          "for the changes to be picked up by Scylla.")
+            self.run_nodetool("drain")
+            self.restart_scylla(verify_up_after=True)
+        self.log.info("Finished running scylla_sysconfig_setup.")
+
 
 class FlakyRetryPolicy(RetryPolicy):
 

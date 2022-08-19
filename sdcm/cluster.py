@@ -3032,7 +3032,11 @@ class BaseNode(AutoSshContainerMixin, WebDriverContainerMixin):  # pylint: disab
                           "for the changes to be picked up by Scylla.")
             self.run_nodetool("drain")
             self.restart_scylla(verify_up_after=True)
+            self.log.info("Finished running scylla_sysconfig_setup.")
+            return True
+
         self.log.info("Finished running scylla_sysconfig_setup.")
+        return False
 
 
 class FlakyRetryPolicy(RetryPolicy):

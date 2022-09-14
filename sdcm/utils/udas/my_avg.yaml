@@ -2,8 +2,8 @@
 
 name: "my_avg"
 args: "int"
-return_type: "int"
-accumulator_udf_name: "xwasm_plus"
+return_type: "float"
+accumulator_udf_name: "xwasm_plus_acc"
 reduce_udf_name: null
-final_udf_name: "lua_div"
+final_udf_name: "xwasm_div_fin"
 initial_condition: "(0, 0)"

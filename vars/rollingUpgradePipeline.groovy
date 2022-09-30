@@ -188,6 +188,13 @@ def call(Map pipelineParams) {
                                                             export SCT_SCYLLA_VERSION=${base_version}
                                                             export SCT_NEW_SCYLLA_REPO=${params.new_scylla_repo}
 
+                                                            if [[ ! -z "${params.azure_image_db}" ]]; then
+                                                                export SCT_AZURE_IMAGE_DB="${params.azure_image_db}"
+                                                            fi
+                                                            if [[ -n "${params.azure_region_name ? params.azure_region_name : ''}" ]] ; then
+                                                                export SCT_AZURE_REGION_NAME=${params.azure_region_name}
+                                                            fi
+
                                                             if [[ -n "${params.post_behavior_db_nodes ? params.post_behavior_db_nodes : ''}" ]] ; then
                                                                 export SCT_POST_BEHAVIOR_DB_NODES="${params.post_behavior_db_nodes}"
                                                             fi

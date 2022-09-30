@@ -21,9 +21,18 @@ def call(Map params, Integer test_duration, String region) {
     } else {
         availability_zone = params.availability_zone
     }
+
+
     if ( availability_zone ) {
         availability_zone_arg = "--availability-zone " + availability_zone
     }
+
+    if ( params.backend.equals("azure") ) {
+        region_zone_arg = "--region " + params.azure_region_name
+    } else {
+        region_zone_arg = "--region " + region
+    }
+
     println(params)
     printf("Cloud provider: %s", cloud_provider)
     sh """
@@ -31,11 +40,11 @@ def call(Map params, Integer test_duration, String region) {
     set -xe
     env
 
-    if [[ "$cloud_provider" == "aws" || "$cloud_provider" == "gce" || "$cloud_provider" == "azure" ]]; then
+    if [ "$cloud_provider" = "aws" ] || [ "$cloud_provider" = "gce" ] || [ "$cloud_provider" = "azure" ]; then
         rm -fv sct_runner_ip
         ./docker/env/hydra.sh create-runner-instance \
             --cloud-provider ${cloud_provider} \
-            --region ${region} \
+            $region_zone_arg \
             $availability_zone_arg \
             $instance_type_arg \
             $root_disk_size_gb_arg \

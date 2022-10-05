@@ -15,6 +15,12 @@ def call(Map pipelineParams) {
             SCT_GCE_PROJECT = "${params.gce_project}"
         }
         parameters {
+            string(defaultValue: "${pipelineParams.get('azure_image_db')}",
+                   description: 'a Azure Image to run against',
+                   name: 'azure_image_db')
+            string(defaultValue: "${pipelineParams.get('azure_region_name', 'eastus')}",
+                   description: 'Azure location',
+                   name: 'azure_region_name')
             string(defaultValue: "${pipelineParams.get('backend', 'gce')}",
                description: 'aws|gce',
                name: 'backend')
@@ -94,22 +100,24 @@ def call(Map pipelineParams) {
                     }
                 }
                 steps {
-                    timeout(time: 10, unit: 'MINUTES') {
-                        script {
-                            wrap([$class: 'BuildUser']) {
-                                dir('scylla-cluster-tests') {
-                                    checkout scm
-                                    ArrayList base_versions_list = params.base_versions.contains('.') ? params.base_versions.split('\\,') : []
-                                    supportedVersions = supportedUpgradeFromVersions(
-                                        base_versions_list,
-                                        pipelineParams.linux_distro,
-                                        params.new_scylla_repo
-                                    )
-                                    (testDuration,
-                                     testRunTimeout,
-                                     runnerTimeout,
-                                     collectLogsTimeout,
-                                     resourceCleanupTimeout) = getJobTimeouts(params, builder.region)
+                    catchError(stageResult: "FAILURE") {
+                        timeout(time: 10, unit: 'MINUTES') {
+                            script {
+                                wrap([$class: 'BuildUser']) {
+                                    dir('scylla-cluster-tests') {
+                                        checkout scm
+                                        ArrayList base_versions_list = params.base_versions.contains('.') ? params.base_versions.split('\\,') : []
+                                        supportedVersions = supportedUpgradeFromVersions(
+                                            base_versions_list,
+                                            pipelineParams.linux_distro,
+                                            params.new_scylla_repo
+                                        )
+                                        (testDuration,
+                                         testRunTimeout,
+                                         runnerTimeout,
+                                         collectLogsTimeout,
+                                         resourceCleanupTimeout) = getJobTimeouts(params, builder.region)
+                                    }
                                 }
                             }
                         }

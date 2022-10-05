@@ -25,6 +25,7 @@ def call(Map params, Integer test_duration, String region) {
         availability_zone_arg = "--availability-zone " + availability_zone
     }
     println(params)
+    printf("Cloud provider: %s", cloud_provider)
     sh """
     #!/bin/bash
     set -xe

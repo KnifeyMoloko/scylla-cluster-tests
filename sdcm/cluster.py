@@ -43,7 +43,7 @@ from tenacity import RetryError
 from invoke.exceptions import UnexpectedExit, Failure, CommandTimedOut
 from cassandra import ConsistencyLevel
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster as ClusterDriver  # pylint: disable=no-name-in-module
+from cassandra.cluster import Cluster as ClusterDriver, Session  # pylint: disable=no-name-in-module
 from cassandra.cluster import NoHostAvailable  # pylint: disable=no-name-in-module
 from cassandra.policies import RetryPolicy
 from cassandra.policies import WhiteListRoundRobinPolicy
@@ -3308,7 +3308,7 @@ class BaseCluster:  # pylint: disable=too-many-instance-attributes,too-many-publ
                                # pylint: disable=too-many-arguments,unused-argument
                                user=None, password=None,
                                compression=True, protocol_version=None,
-                               port=None, ssl_opts=None, connect_timeout=100, verbose=True):
+                               port=None, ssl_opts=None, connect_timeout=100, verbose=True) -> Session:
         """
         Returns a connection after it stops throwing NoHostAvailables.
 

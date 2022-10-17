@@ -195,6 +195,10 @@ def call(Map pipelineParams) {
                                                                 export SCT_AZURE_REGION_NAME=${params.azure_region_name}
                                                             fi
 
+                                                            if [[ -n "${params.availability_zone ? params.availability_zone : ''}" ]] ; then
+                                                                export SCT_AVAILABILITY_ZONE="${params.availability_zone}"
+                                                            fi
+
                                                             if [[ -n "${params.post_behavior_db_nodes ? params.post_behavior_db_nodes : ''}" ]] ; then
                                                                 export SCT_POST_BEHAVIOR_DB_NODES="${params.post_behavior_db_nodes}"
                                                             fi

@@ -39,11 +39,12 @@ class FullScanParams:
     page_size: int = 10000
     fullscan_user: str = None
     fullscan_user_password: str = None
-    pk_name: str = None
-    ck_name: str = None
-    data_column_name: str = None
+    pk_name: str = 'pk'
+    ck_name: str = 'ck'
+    data_column_name: str = 'v'
     validate_data: bool = None
     include_data_column: bool = None
+    rows_count: int = 5000
 
 
 @dataclass
@@ -310,10 +311,10 @@ class FullPartitionScanOperation(ScanOperation):
         super().__init__(scan_event=FullPartitionScanReversedOrderEvent, **kwargs)
         self.full_partition_scan_params = kwargs
         self.validate_data = self.fullscan_params.validate_data
-        self.pk_name = self.full_partition_scan_params.get('pk_name', 'pk')
-        self.ck_name = self.full_partition_scan_params.get('ck_name', 'ck')
-        self.data_column_name = self.full_partition_scan_params.get('data_column_name', 'v')
-        self.rows_count = self.full_partition_scan_params.get('rows_count', 5000)
+        self.pk_name = self.fullscan_params.pk_name
+        self.ck_name = self.fullscan_params.ck_name
+        self.data_column_name = self.fullscan_params.data_column_name
+        self.rows_count = self.fullscan_params.rows_count
         self.table_clustering_order = ""
         self.reversed_order = 'desc' if self.table_clustering_order.lower() == 'asc' else 'asc'
         self.reversed_query_filter_ck_stats = {'lt': {'count': 0, 'total_scan_duration': 0},

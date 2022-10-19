@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import random
 import re
@@ -310,8 +309,7 @@ class FullPartitionScanOperation(ScanOperation):
     def __init__(self, **kwargs):
         super().__init__(scan_event=FullPartitionScanReversedOrderEvent, **kwargs)
         self.full_partition_scan_params = kwargs
-        self.full_partition_scan_params['validate_data'] = json.loads(
-            self.full_partition_scan_params.get('validate_data', 'false'))
+        self.validate_data = self.fullscan_params.validate_data
         self.pk_name = self.full_partition_scan_params.get('pk_name', 'pk')
         self.ck_name = self.full_partition_scan_params.get('ck_name', 'ck')
         self.data_column_name = self.full_partition_scan_params.get('data_column_name', 'v')
@@ -503,7 +501,7 @@ class FullPartitionScanOperation(ScanOperation):
         self.log.debug('Average %s scans duration of %s executions is: %s', self.ck_filter, count, average)
         self.update_stats()
 
-        if self.full_partition_scan_params.get('validate_data'):
+        if self.fullscan_params.validate_data:
             self.log.debug('Executing the normal query: %s', normal_query)
             regular_op_stat = self.run_scan_event(cmd=normal_query, scan_event=FullPartitionScanEvent)
             comparison_result = self._compare_output_files()

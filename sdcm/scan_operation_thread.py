@@ -481,6 +481,7 @@ class FullPartitionScanOperation(ScanOperation):
     def run_scan_operation(self, cmd: str = None):  # pylint: disable=too-many-locals
         queries = self.randomly_form_cql_statement()
         self.wait_until_user_table_exists(self.fullscan_params.ks_cf)
+        self._set_test_ks_cf()
         self.table_clustering_order = self.get_table_clustering_order()
 
         if not queries:

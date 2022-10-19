@@ -429,7 +429,7 @@ class FullPartitionScanOperation(ScanOperation):
         self.log.debug('Fetched a total of %s pages', handler.current_read_pages)
 
     def execute_query(self, session, cmd: str) -> ResponseFuture:
-        self.log.debug('Will run command "%s"', cmd)
+        self.log.info('Will run command "%s"', cmd)
         session.default_fetch_size = self.fullscan_params.page_size
         session.default_consistency_level = ConsistencyLevel.ONE
         return session.execute_async(cmd)

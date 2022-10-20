@@ -334,7 +334,7 @@ class FullPartitionScanOperation(ScanOperation):
             with self.fullscan_params.db_cluster.cql_connection_patient(node=node, connect_timeout=300) as session:
                 # Using CL ONE. No need for a quorum since querying a constant fixed attribute of a table.
                 session.default_consistency_level = ConsistencyLevel.ONE
-                return get_table_clustering_order(ks_cf=self.fullscan_params.fullscan_user,
+                return get_table_clustering_order(ks_cf=self.fullscan_params.ks_cf,
                                                   ck_name=self.ck_name, session=session)
         except Exception as error:  # pylint: disable=broad-except
             self.log.error('Failed getting table %s clustering order through node %s : %s',

@@ -216,7 +216,6 @@
 | **<a href="#user-content-add_node_cnt" name="add_node_cnt">add_node_cnt</a>**  |  | 1 | SCT_ADD_NODE_CNT
 | **<a href="#user-content-stress_multiplier" name="stress_multiplier">stress_multiplier</a>**  |  | 1 | SCT_STRESS_MULTIPLIER
 | **<a href="#user-content-run_fullscan" name="run_fullscan">run_fullscan</a>**  |  | N/A | SCT_RUN_FULLSCAN
-| **<a href="#user-content-run_full_partition_scan" name="run_full_partition_scan">run_full_partition_scan</a>**  | Runs a background thread that issues reversed-queries on a table random partition by an interval | N/A | SCT_run_full_partition_scan
 | **<a href="#user-content-keyspace_num" name="keyspace_num">keyspace_num</a>**  |  | 1 | SCT_KEYSPACE_NUM
 | **<a href="#user-content-round_robin" name="round_robin">round_robin</a>**  |  | N/A | SCT_ROUND_ROBIN
 | **<a href="#user-content-batch_size" name="batch_size">batch_size</a>**  |  | 1 | SCT_BATCH_SIZE

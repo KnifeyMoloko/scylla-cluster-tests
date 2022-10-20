@@ -372,8 +372,6 @@ class FullPartitionScanOperation(ScanOperation):
                 # select * from scylla_bench.test where pk = 1234 and ck < 4721 and ck > 2549 order by ck desc
                 # limit 3467 bypass cache
                 selected_columns = [self.fullscan_params.pk_name, self.fullscan_params.ck_name]
-                self.log.info("include_data_column at the column selection part: %s full params: %s",
-                              self.fullscan_params.include_data_column, self.fullscan_params)
                 if self.fullscan_params.include_data_column:
                     selected_columns.append(self.fullscan_params.data_column_name)
                 reversed_query = f'select {",".join(selected_columns)} from {self.fullscan_params.ks_cf}' + \

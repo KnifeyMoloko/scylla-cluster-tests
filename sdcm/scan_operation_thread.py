@@ -375,8 +375,8 @@ class FullPartitionScanOperation(ScanOperation):
 
         with self.fullscan_params.db_cluster.cql_connection_patient(
                 node=db_node, connect_timeout=300) as session:
-            ck_random_min_value = self.generator.randint(a=1, b=self.rows_count)
-            ck_random_max_value = self.generator.randint(a=ck_random_min_value, b=self.rows_count)
+            ck_random_min_value = self.generator.randint(a=1, b=self.fullscan_params.rows_count)
+            ck_random_max_value = self.generator.randint(a=ck_random_min_value, b=self.fullscan_params.rows_count)
             self.ck_filter = ck_filter = self.generator.choice(list(self.reversed_query_filter_ck_by.keys()))
             pk_name = self.pk_name
 
@@ -425,7 +425,7 @@ class FullPartitionScanOperation(ScanOperation):
                 query_suffix = self.generator.choice(BYPASS_CACHE_VALUES)
                 normal_query = reversed_query + query_suffix
                 if self.generator.choice([False] + [True]):  # Randomly add a LIMIT
-                    self.limit = self.generator.randint(a=1, b=self.rows_count)
+                    self.limit = self.generator.randint(a=1, b=self.fullscan_params.rows_count)
                     query_suffix = f' limit {self.limit}' + query_suffix
                 reversed_query += f' order by {self.ck_name} {self.reversed_order}' + query_suffix
                 self.log.debug('Randomly formed normal query is: %s', normal_query)

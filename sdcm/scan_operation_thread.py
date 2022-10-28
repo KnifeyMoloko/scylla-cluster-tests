@@ -329,8 +329,6 @@ class FullPartitionScanOperation(ScanOperation):
         super().__init__(generator, scan_event=FullPartitionScanReversedOrderEvent, **kwargs)
         self.full_partition_scan_params = kwargs
         self.validate_data = self.fullscan_params.validate_data
-        self.pk_name = self.fullscan_params.pk_name
-        self.ck_name = self.fullscan_params.ck_name
         self.data_column_name = self.fullscan_params.data_column_name
         self.rows_count = self.fullscan_params.rows_count
         self.table_clustering_order = ""
@@ -353,7 +351,7 @@ class FullPartitionScanOperation(ScanOperation):
                 # Using CL ONE. No need for a quorum since querying a constant fixed attribute of a table.
                 session.default_consistency_level = ConsistencyLevel.ONE
                 return get_table_clustering_order(ks_cf=self.fullscan_params.ks_cf,
-                                                  ck_name=self.ck_name, session=session)
+                                                  ck_name=self.fullscan_params.ck_name, session=session)
         except Exception as error:  # pylint: disable=broad-except
             self.log.error('Failed getting table %s clustering order through node %s : %s',
                            self.fullscan_params.ks_cf, node.name,
@@ -378,14 +376,14 @@ class FullPartitionScanOperation(ScanOperation):
             ck_random_min_value = self.generator.randint(a=1, b=self.fullscan_params.rows_count)
             ck_random_max_value = self.generator.randint(a=ck_random_min_value, b=self.fullscan_params.rows_count)
             self.ck_filter = ck_filter = self.generator.choice(list(self.reversed_query_filter_ck_by.keys()))
-            pk_name = self.pk_name
+            pk_name = self.fullscan_params.pk_name
 
             if pks := get_partition_keys(ks_cf=self.fullscan_params.ks_cf, session=session, pk_name=pk_name):
                 partition_key = self.generator.choice(pks)
                 # Form a random query out of all options, like:
                 # select * from scylla_bench.test where pk = 1234 and ck < 4721 and ck > 2549 order by ck desc
                 # limit 3467 bypass cache
-                selected_columns = [pk_name, self.ck_name]
+                selected_columns = [pk_name, self.fullscan_params.ck_name]
                 if self.full_partition_scan_params.get('include_data_column'):
                     selected_columns.append(self.data_column_name)
                 reversed_query = f'select {",".join(selected_columns)} from {self.fullscan_params.ks_cf}' + \
@@ -402,32 +400,38 @@ class FullPartitionScanOperation(ScanOperation):
                 match ck_filter:
                     case 'lt_and_gt':
                         # Example: select * from scylla_bench.test where pk = 1 and ck > 10 and ck < 15 order by ck desc
-                        reversed_query += self.reversed_query_filter_ck_by[ck_filter].format(self.ck_name,
-                                                                                             ck_random_max_value,
-                                                                                             self.ck_name,
-                                                                                             ck_random_min_value)
+                        reversed_query += self.reversed_query_filter_ck_by[ck_filter].format(
+                            self.fullscan_params.ck_name,
+                            ck_random_max_value,
+                            self.fullscan_params.ck_name,
+                            ck_random_min_value
+                        )
 
                     case 'gt':
                         # example: rows-count = 20, ck > 10, limit = 5 ==> ck_range = 20 - 10 = 10 ==> limit < ck_range
                         # reversed query is: select * from scylla_bench.test where pk = 1 and ck > 10
                         # order by ck desc limit 5
                         # normal query should be: select * from scylla_bench.test where pk = 1 and ck > 15 limit 5
-                        reversed_query += self.reversed_query_filter_ck_by[ck_filter].format(self.ck_name,
-                                                                                             ck_random_min_value)
+                        reversed_query += self.reversed_query_filter_ck_by[ck_filter].format(
+                            self.fullscan_params.ck_name,
+                            ck_random_min_value
+                        )
 
                     case 'lt':
                         # example: rows-count = 20, ck < 10, limit = 5 ==> limit < ck_random_min_value (ck_range)
                         # reversed query is: select * from scylla_bench.test where pk = 1 and ck < 10
                         # order by ck desc limit 5
                         # normal query should be: select * from scylla_bench.test where pk = 1 and ck >= 5 limit 5
-                        reversed_query += self.reversed_query_filter_ck_by[ck_filter].format(self.ck_name,
-                                                                                             ck_random_min_value)
+                        reversed_query += self.reversed_query_filter_ck_by[ck_filter].format(
+                            self.fullscan_params.ck_name,
+                            ck_random_min_value
+                        )
                 query_suffix = self.generator.choice(BYPASS_CACHE_VALUES)
                 normal_query = reversed_query + query_suffix
                 if self.generator.choice([False] + [True]):  # Randomly add a LIMIT
                     self.limit = self.generator.randint(a=1, b=self.fullscan_params.rows_count)
                     query_suffix = f' limit {self.limit}' + query_suffix
-                reversed_query += f' order by {self.ck_name} {self.reversed_order}' + query_suffix
+                reversed_query += f' order by {self.fullscan_params.ck_name} {self.reversed_order}' + query_suffix
                 self.log.debug('Randomly formed normal query is: %s', normal_query)
                 self.log.debug('[scan: %s, type: %s] Randomly formed reversed query is: %s',
                                self.fullscan_stats.scans_counter,

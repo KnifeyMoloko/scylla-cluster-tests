@@ -432,13 +432,13 @@ class FullPartitionScanOperation(ScanOperation):
                     self.limit = self.generator.randint(a=1, b=self.fullscan_params.rows_count)
                     query_suffix = f' limit {self.limit}' + query_suffix
                 reversed_query += f' order by {self.fullscan_params.ck_name} {self.reversed_order}' + query_suffix
-                self.log.debug('Randomly formed normal query is: %s', normal_query)
-                self.log.debug('[scan: %s, type: %s] Randomly formed reversed query is: %s',
-                               self.fullscan_stats.scans_counter,
-                               ck_filter, reversed_query)
+                self.log.info('Randomly formed normal query is: %s', normal_query)
+                self.log.info('[scan: %s, type: %s] Randomly formed reversed query is: %s',
+                              self.fullscan_stats.scans_counter,
+                              ck_filter, reversed_query)
             else:
-                self.log.debug('No partition keys found for table: %s! A reversed query cannot be executed!',
-                               self.fullscan_params.ks_cf)
+                self.log.info('No partition keys found for table: %s! A reversed query cannot be executed!',
+                              self.fullscan_params.ks_cf)
                 return None
         return normal_query, reversed_query
 

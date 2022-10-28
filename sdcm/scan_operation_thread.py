@@ -170,16 +170,12 @@ class ScanOperation:
     def _get_random_node(self) -> BaseNode:
         return self.generator.choice(self.fullscan_params.db_cluster.nodes)
 
-    def _set_test_ks_cf(self) -> None:
-        if self.fullscan_params.ks_cf.lower() == "random":
-            self.fullscan_params.ks_cf = random.choice(
-                self.fullscan_params.db_cluster.get_non_system_ks_cf_list(self.db_node))
-
     def wait_until_user_table_exists(self, ks_cf: str = 'random', timeout_min: int = 20):
         text = f'Waiting until {ks_cf} user table exists'
         if ks_cf.lower() == 'random':
             wait.wait_for(func=lambda: len(self.fullscan_params.db_cluster.get_non_system_ks_cf_list(self.db_node)) > 0,
                           step=60, text=text, timeout=60 * timeout_min, throw_exc=True)
+            self.fullscan_params.ks_cf = self.fullscan_params.db_cluster.get_non_system_ks_cf_list(self.db_node)
         else:
             wait.wait_for(func=lambda: ks_cf in (
                 self.fullscan_params.db_cluster.get_non_system_ks_cf_list(self.db_node)
@@ -259,8 +255,7 @@ class ScanOperation:
 
     def run_scan_operation(self, cmd: str = None):
         self.log.info("Running fullscan operation: %s", self.__class__.__name__)
-        self._set_test_ks_cf()
-        self.wait_until_user_table_exists(ks_cf=self.fullscan_params.ks_cf)
+        self.wait_until_user_table_exists(ks_cf=self.fullscan_params.ks_cf, timeout_min=30)
 
         self.run_scan_event(cmd=cmd or self.randomly_form_cql_statement(), scan_event=self.scan_event)
 
@@ -370,6 +365,7 @@ class FullPartitionScanOperation(ScanOperation):
         :return: a CQL reversed-query
         """
         db_node = self._get_random_node()
+        self.wait_until_user_table_exists(self.fullscan_params.ks_cf, timeout_min=30)
 
         with self.fullscan_params.db_cluster.cql_connection_patient(
                 node=db_node, connect_timeout=300) as session:
@@ -504,8 +500,7 @@ class FullPartitionScanOperation(ScanOperation):
 
     def run_scan_operation(self, cmd: str = None):  # pylint: disable=too-many-locals
         queries = self.randomly_form_cql_statement()
-        self.wait_until_user_table_exists(self.fullscan_params.ks_cf)
-        self._set_test_ks_cf()
+        self.wait_until_user_table_exists(self.fullscan_params.ks_cf, timeout_min=30)
         self.table_clustering_order = self.get_table_clustering_order()
 
         if not queries:

@@ -16,6 +16,7 @@ from cassandra import ConsistencyLevel
 from cassandra.cluster import ResponseFuture, ResultSet  # pylint: disable=no-name-in-module
 from cassandra.query import SimpleStatement  # pylint: disable=no-name-in-module
 from prettytable import PrettyTable
+from tenacity import RetryError
 
 from sdcm import wait
 from sdcm.cluster import BaseScyllaCluster, BaseCluster, BaseNode
@@ -255,8 +256,14 @@ class ScanOperation:
 
     def run_scan_operation(self, cmd: str = None):
         self.log.info("Running fullscan operation: %s", self.__class__.__name__)
-        self.wait_until_user_table_exists(ks_cf=self.fullscan_params.ks_cf, timeout_min=30)
 
+        try:
+            self.wait_for_stress_thread()
+        except RetryError:
+            self.log.warning("RetryError encountered while waiting for cassandra-stress threads to start.")
+            return
+
+        self.wait_until_user_table_exists(ks_cf=self.fullscan_params.ks_cf, timeout_min=30)
         self.run_scan_event(cmd=cmd or self.randomly_form_cql_statement(), scan_event=self.scan_event)
 
     @staticmethod
@@ -280,6 +287,31 @@ class ScanOperation:
             result.fetch_next_page()
             if read_pages > 0:
                 pages += 1
+
+    def is_cassandra_stress_process_running_on_loaders(self) -> bool:
+        loaders: list[BaseNode] = [node for node in self.fullscan_params.db_cluster.nodes if "loader" in node.name]
+        list_of_processes = []
+
+        for loader in loaders:
+            search_cmds = [
+                'pgrep -f .*cassandra.*',
+                'pgrep -f cassandra.stress',
+                'pgrep -f cassandra-stress'
+            ]
+            for filter_cmd in search_cmds:
+                list_of_processes = loader.remoter.run(cmd=filter_cmd, verbose=True, ignore_status=True)
+
+            if list_of_processes.stdout.strip():
+                return True
+
+        return False
+
+    def wait_for_stress_thread(self, timeout_min: int = 20):
+        wait.wait_for(func=lambda: self.is_cassandra_stress_process_running_on_loaders() is True,
+                      step=60,
+                      text="Waiting for cassandra-stress processes to start on the loader",
+                      timeout=60 * timeout_min,
+                      throw_exc=True)
 
 
 class FullScanOperation(ScanOperation):
@@ -365,6 +397,11 @@ class FullPartitionScanOperation(ScanOperation):
         :return: a CQL reversed-query
         """
         db_node = self._get_random_node()
+        try:
+            self.wait_for_stress_thread(timeout_min=20)
+        except RuntimeError:
+            return None
+
         self.wait_until_user_table_exists(self.fullscan_params.ks_cf, timeout_min=30)
 
         with self.fullscan_params.db_cluster.cql_connection_patient(
@@ -500,6 +537,7 @@ class FullPartitionScanOperation(ScanOperation):
 
     def run_scan_operation(self, cmd: str = None):  # pylint: disable=too-many-locals
         queries = self.randomly_form_cql_statement()
+
         self.wait_until_user_table_exists(self.fullscan_params.ks_cf, timeout_min=30)
         self.table_clustering_order = self.get_table_clustering_order()
 

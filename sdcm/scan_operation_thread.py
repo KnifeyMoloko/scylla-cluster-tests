@@ -174,12 +174,12 @@ class ScanOperation:
         text = f'Waiting until {ks_cf} user table exists'
         if ks_cf.lower() == 'random':
             wait.wait_for(func=lambda: len(self.fullscan_params.db_cluster.get_non_system_ks_cf_list(self.db_node)) > 0,
-                          step=60, text=text, timeout=60 * timeout_min, throw_exc=True)
+                          step=60, text=text, timeout=60 * timeout_min, throw_exc=False)
             self.fullscan_params.ks_cf = self.fullscan_params.db_cluster.get_non_system_ks_cf_list(self.db_node)
         else:
             wait.wait_for(func=lambda: ks_cf in (
                 self.fullscan_params.db_cluster.get_non_system_ks_cf_list(self.db_node)
-            ), step=60, text=text, timeout=60 * timeout_min, throw_exc=True)
+            ), step=60, text=text, timeout=60 * timeout_min, throw_exc=False)
 
     @abstractmethod
     def randomly_form_cql_statement(self):

@@ -36,7 +36,7 @@ LOCAL_CMD_RUNNER = LocalCmdRunner()
 class FullScanParams:
     mode: str
     db_cluster: [BaseScyllaCluster, BaseCluster] = None
-    ks_cf: str = random
+    ks_cf: str = "random"
     duration: int = None
     interval: int = 10
     page_size: int = 10000
@@ -89,7 +89,7 @@ class FullscanException(Exception):
 
 # pylint: disable=too-many-instance-attributes
 class ScanOperationThread:
-    OPERATION_QUEUE_MAXSIZE = 1000
+    OPERATION_QUEUE_MAXSIZE = 10000
 
     def __init__(self, fullscan_params: FullScanParams, thread_name: str = ""):
         self.fullscan_params = fullscan_params
@@ -98,6 +98,8 @@ class ScanOperationThread:
         self.operation_queue = self._get_operation_queue()
         self.log = logging.getLogger(self.__class__.__name__)
         self._thread = threading.Thread(daemon=True, name=f"{self.__class__.__name__}_{thread_name}", target=self.run)
+        self.log.info("ScanOperationThread running with a randomness generator with seed: %s",
+                      int(self.fullscan_params.db_cluster.params.get("nemesis_seed")))
 
     def _get_random_node(self) -> BaseNode:
         return random.choice(self.fullscan_params.db_cluster.nodes)
@@ -124,7 +126,6 @@ class ScanOperationThread:
                 scan_op = self.operation_queue.queue.pop()
                 self.log.info("Going to run fullscan operation %s", scan_op.__class__.__name__)
                 scan_op.run_scan_operation()
-                self.log.info("Fullscan stats:\n%s", self.fullscan_stats.get_stats_pretty_table())
 
             self.log.info("Fullscan operations queue depleted.")
 
@@ -138,6 +139,7 @@ class ScanOperationThread:
             self.fullscan_stats.read_pages = random.choice([100, 1000, 0])
             self.run_next_scan_operation()
             time.sleep(self.fullscan_params.interval)
+        self.log.info("Fullscan stats:\n%s", self.fullscan_stats.get_stats_pretty_table())
 
     def start(self):
         self._thread.start()
@@ -152,7 +154,7 @@ class ScanOperationThread:
         if self.fullscan_params.ks_cf.lower() == 'random':
             wait.wait_for(func=lambda: len(self.fullscan_params.db_cluster.get_non_system_ks_cf_list(db_node)) > 0,
                           step=60, text=text, timeout=60 * timeout_min, throw_exc=False)
-            self.fullscan_params.ks_cf = self.fullscan_params.db_cluster.get_non_system_ks_cf_list(db_node)
+            self.fullscan_params.ks_cf = self.fullscan_params.db_cluster.get_non_system_ks_cf_list(db_node)[0]
         else:
             wait.wait_for(func=lambda: self.fullscan_params.ks_cf in (
                 self.fullscan_params.db_cluster.get_non_system_ks_cf_list(db_node)
@@ -291,33 +293,6 @@ class ScanOperation:
             result.fetch_next_page()
             if read_pages > 0:
                 pages += 1
-
-    def is_cassandra_stress_process_running_on_loaders(self) -> bool:
-        loaders: list[BaseNode] = [node for node in self.fullscan_params.db_cluster.nodes if "loader" in node.name]
-        list_of_processes = []
-
-        for loader in loaders:
-            search_cmds = [
-                'pgrep -f .*cassandra.*',
-                'pgrep -f cassandra.stress',
-                'pgrep -f cassandra-stress'
-            ]
-            for filter_cmd in search_cmds:
-                list_of_processes = loader.remoter.run(cmd=filter_cmd, verbose=True, ignore_status=True)
-
-            if list_of_processes.stdout.strip():
-                self.log.info("Found cassandra-stress process running on loader %s", loader.name)
-                return True
-
-        self.log.info("Did not find the cassandra-stress process running on any loaders.")
-        return False
-
-    def wait_for_stress_thread(self, timeout_min: int = 20):
-        wait.wait_for(func=lambda: self.is_cassandra_stress_process_running_on_loaders() is True,
-                      step=60,
-                      text="Waiting for cassandra-stress processes to start on the loader",
-                      timeout=60 * timeout_min,
-                      throw_exc=True)
 
 
 class FullScanOperation(ScanOperation):
@@ -545,7 +520,7 @@ class FullPartitionScanOperation(ScanOperation):
         normal_query, reversed_query = queries
 
         full_partition_op_stat = FullScanOperationStat(
-            op_type=self.scan_event.__class__.__name__,
+            op_type=self.__class__.__name__,
             nemesis_at_start=self.db_node.running_nemesis,
             cmd=str(queries)
         )

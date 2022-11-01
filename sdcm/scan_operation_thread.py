@@ -179,7 +179,6 @@ class ScanOperation:
         self.termination_event = self.fullscan_params.db_cluster.nemesis_termination_event
         self.generator = generator
         self.db_node = self._get_random_node()
-        self.query = self.randomly_form_cql_statement()
 
     def _get_random_node(self) -> BaseNode:
         return self.generator.choice(self.fullscan_params.db_cluster.nodes)
@@ -537,8 +536,8 @@ class FullPartitionScanOperation(ScanOperation):
         return result
 
     def run_scan_operation(self, cmd: str = None):  # pylint: disable=too-many-locals
-        queries = self.randomly_form_cql_statement()
         self.table_clustering_order = self.get_table_clustering_order()
+        queries = self.randomly_form_cql_statement()
 
         if not queries:
             return

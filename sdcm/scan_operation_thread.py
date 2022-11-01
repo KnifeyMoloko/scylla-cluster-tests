@@ -39,7 +39,7 @@ class FullScanParams:
     db_cluster: [BaseScyllaCluster, BaseCluster] = None
     ks_cf: str = random
     duration: int = None
-    interval: int = 1
+    interval: int = 10
     page_size: int = 10000
     fullscan_user: str = None
     fullscan_user_password: str = None
@@ -302,8 +302,10 @@ class ScanOperation:
                 list_of_processes = loader.remoter.run(cmd=filter_cmd, verbose=True, ignore_status=True)
 
             if list_of_processes.stdout.strip():
+                self.log.info("Found cassandra-stress process running on loader %s", loader.name)
                 return True
 
+        self.log.info("Did not find the cassandra-stress process running on any loaders.")
         return False
 
     def wait_for_stress_thread(self, timeout_min: int = 20):

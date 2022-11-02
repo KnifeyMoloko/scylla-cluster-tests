@@ -138,7 +138,7 @@ class ScanOperationThread:
         while time.time() < end_time and not self.fullscan_params.db_cluster.nemesis_termination_event.is_set():
             self.fullscan_stats.read_pages = random.choice([100, 1000, 0])
             self.run_next_scan_operation()
-            time.sleep(self.fullscan_params.interval)
+            time.sleep(self.fullscan_params.interval * 60)
         self.log.info("Fullscan stats:\n%s", self.fullscan_stats.get_stats_pretty_table())
 
     def start(self):
@@ -184,17 +184,6 @@ class ScanOperation:
 
     def _get_random_node(self) -> BaseNode:
         return self.generator.choice(self.fullscan_params.db_cluster.nodes)
-
-    # def wait_until_user_table_exists(self, ks_cf: str = 'random', timeout_min: int = 20):
-    #     text = f'Waiting until {ks_cf} user table exists'
-    #     if ks_cf.lower() == 'random':
-    #         wait.wait_for(func=lambda: len(self.fullscan_params.db_cluster.get_non_system_ks_cf_list(self.db_node)) > 0,
-    #                       step=60, text=text, timeout=60 * timeout_min, throw_exc=False)
-    #         self.fullscan_params.ks_cf = self.fullscan_params.db_cluster.get_non_system_ks_cf_list(self.db_node)
-    #     else:
-    #         wait.wait_for(func=lambda: ks_cf in (
-    #             self.fullscan_params.db_cluster.get_non_system_ks_cf_list(self.db_node)
-    #         ), step=60, text=text, timeout=60 * timeout_min, throw_exc=False)
 
     @abstractmethod
     def randomly_form_cql_statement(self):

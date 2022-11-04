@@ -100,6 +100,7 @@ def call(Map pipelineParams) {
                                 dir('scylla-cluster-tests') {
                                     checkout scm
                                     ArrayList base_versions_list = params.base_versions.contains('.') ? params.base_versions.split('\\,') : []
+
                                     supportedVersions = supportedUpgradeFromVersions(
                                         base_versions_list,
                                         pipelineParams.linux_distro,

@@ -75,7 +75,7 @@ class FullScanStats:
 class FullScanOperationStat:
     op_type: str = None
     duration: float = None
-    exceptions: list = None
+    exceptions: list = field(default_factory=list)
     nemesis_at_start: str = None
     nemesis_at_end: str = None
     success: bool = None
@@ -129,7 +129,7 @@ class ScanOperationThread:
             self.log.debug("Fullscan operations queue depleted.")
 
         except Exception as exc:  # pylint: disable=broad-except
-            self.log.warning("Encountered exception while performing a fullscan operation:\n%s", exc)
+            self.log.warning("Encountered exception while performing a fullscan operation:\n%s", exc.with_traceback())
 
     def run(self):
         end_time = time.time() + self.fullscan_params.duration
@@ -193,7 +193,7 @@ class ScanOperation:
         return session.execute(SimpleStatement(
             cmd,
             fetch_size=self.fullscan_params.page_size,
-            consistency_level=ConsistencyLevel.ONE))
+            consistency_level=ConsistencyLevel.ONE), verbose=False)
 
     def run_scan_event(self, cmd: str,
                        scan_event: Type[FullScanEvent | FullPartitionScanEvent
@@ -291,13 +291,6 @@ class FullScanOperation(ScanOperation):
                                     timeout=f" {timeout}s",
                                     bypass_cache=bypass_cache)
         return cmd
-
-    def execute_query(self, session, cmd: str) -> ResultSet:
-        self.log.info('Will run command "%s"', cmd)
-        return session.execute(SimpleStatement(
-            cmd,
-            fetch_size=self.fullscan_params.page_size,
-            consistency_level=ConsistencyLevel.ONE))
 
 
 class FullPartitionScanOperation(ScanOperation):
@@ -470,14 +463,14 @@ class FullPartitionScanOperation(ScanOperation):
             LOCAL_CMD_RUNNER.run(cmd=f'cp {reorder_normal_query_output.name} {self.normal_query_output.name}',
                                  ignore_status=True)
             self.normal_query_output.flush()
+            file_names = f' {self.normal_query_output.name} {self.reversed_query_output.name}'
+            diff_cmd = f"diff -y --suppress-common-lines {file_names}"
+            self.log.info("Comparing scan queries output files by: %s", diff_cmd)
+            result = LOCAL_CMD_RUNNER.run(cmd=diff_cmd, ignore_status=True)
 
-        file_names = f' {self.normal_query_output.name} {self.reversed_query_output.name}'
-        diff_cmd = f"diff -y --suppress-common-lines {file_names}"
-        self.log.info("Comparing scan queries output files by: %s", diff_cmd)
-        result = LOCAL_CMD_RUNNER.run(cmd=diff_cmd, ignore_status=True)
         if not result.stderr:
             if not result.stdout:
-                self.log.debug("Compared output of normal and reversed queries is identical!")
+                self.log.info("Compared output of normal and reversed queries is identical!")
                 result = True
             else:
                 self.log.warning("Normal and reversed queries output differs: \n%s", result.stdout.strip())
@@ -488,6 +481,9 @@ class FullPartitionScanOperation(ScanOperation):
                     if result.stdout:
                         stdout = result.stdout.strip()
                         self.log.info("%s command output is: \n%s", cmd, stdout)
+        else:
+            self.log.warning("Comparison stderr:\n%s", result.stderr)
+
         self.reset_output_files()
         return result
 
@@ -512,11 +508,11 @@ class FullPartitionScanOperation(ScanOperation):
         count = self.reversed_query_filter_ck_stats[self.ck_filter]['count']
         average = self.reversed_query_filter_ck_stats[self.ck_filter]['total_scan_duration'] / count
         self.log.debug('Average %s scans duration of %s executions is: %s', self.ck_filter, count, average)
-        self.update_stats(reversed_op_stat)
 
         if self.fullscan_params.validate_data:
             self.log.debug('Executing the normal query: %s', normal_query)
-            regular_op_stat = self.run_scan_event(cmd=normal_query, scan_event=FullPartitionScanEvent)
+            self.scan_event = FullPartitionScanEvent
+            regular_op_stat = self.run_scan_event(cmd=normal_query, scan_event=self.scan_event)
             comparison_result = self._compare_output_files()
             full_partition_op_stat.nemesis_at_end = self.db_node.running_nemesis
             full_partition_op_stat.exceptions.append(regular_op_stat.exceptions)
@@ -525,10 +521,6 @@ class FullPartitionScanOperation(ScanOperation):
                 full_partition_op_stat.success = True
             else:
                 full_partition_op_stat.success = False
-            self.update_stats(full_partition_op_stat)
-
-    def update_stats(self, new_stat):
-        self.fullscan_stats.stats.append(new_stat)
 
 
 class FullScanAggregatesOperation(ScanOperation):
@@ -546,7 +538,7 @@ class FullScanAggregatesOperation(ScanOperation):
         return cmd
 
     def execute_query(self, session, cmd: str) -> ResultSet:
-        cmd_result: ResultSet = session.execute(query=cmd, trace=True)
+        cmd_result: ResultSet = session.execute(query=cmd, trace=True, verbose=False)
         if self._validate_fullscan_result(cmd_result):
             self.scan_event.message = f"{type(self).__name__} operation ended successfully"
         else:
@@ -595,6 +587,7 @@ class PagedResultHandler:
 
     def handle_page(self, rows):
         include_data_column = self.scan_operation.fullscan_params.include_data_column
+        self.log.info("Processing number of rows %s for scan_event %s", len(rows), self.scan_operation.scan_event)
         if self.scan_operation.scan_event == FullPartitionScanEvent:
             for row in rows:
                 self.scan_operation.normal_query_output.write(

@@ -52,6 +52,9 @@ class FullScanParams:
 
 @dataclass
 class FullScanStats:
+    """
+    Keeps track of stats for multiple fullscan operations.
+    """
     number_of_rows_read: int = 0
     read_pages: int = 0
     scans_counter: int = 0
@@ -72,6 +75,9 @@ class FullScanStats:
 
 @dataclass
 class FullScanOperationStat:
+    """
+    Keeps track of stats for a single fullscan operation.
+    """
     op_type: str = None
     duration: float = None
     exceptions: list = field(default_factory=list)
@@ -81,6 +87,16 @@ class FullScanOperationStat:
     cmd: str = None
 
 
+class FullScanCommand(NamedTuple):
+    name: str
+    base_query: Template
+
+
+class FullScanAggregateCommands(NamedTuple):
+    SELECT_ALL = FullScanCommand("SELECT_ALL", Template("SELECT * from $ks_cf$bypass_cache$timeout"))
+    AGG_COUNT_ALL = FullScanCommand("AGG_COUNT_ALL", Template("SELECT count(*) FROM $ks_cf$timeout$bypass_cache"))
+
+
 class FullscanException(Exception):
     """ Exception during running a fullscan"""
     ...
@@ -88,6 +104,21 @@ class FullscanException(Exception):
 
 # pylint: disable=too-many-instance-attributes
 class ScanOperationThread:
+    """
+    Runs fullscan operations according to the parameters specified in the test
+    config yaml files. Has 4 main modes:
+    - random: uses a seeded random generator to generate a queue of fullscan
+    operations using all the available operation types
+    - select: uses only FullScanOperation
+    - partition: uses only FullPartitionScanOperation
+    - aggregate: uses only FullScanAggregatesOperation
+
+    Check FullScanParams class for parameters to tweak.
+
+    Note: the seeded random generator is shared between the thread class and
+    the operations instances, so the generated CQL commands are also replicable
+    when the same seed value is used.
+    """
     OPERATION_QUEUE_MAXSIZE = 10000
 
     def __init__(self, fullscan_params: FullScanParams, thread_name: str = ""):
@@ -98,15 +129,13 @@ class ScanOperationThread:
         self.operation_queue = self._get_operation_queue()
         self._thread = threading.Thread(daemon=True, name=f"{self.__class__.__name__}_{thread_name}", target=self.run)
 
-    def _get_random_node(self) -> BaseNode:
-        return random.choice(self.fullscan_params.db_cluster.nodes)
-
     def _get_scan_operation_instance(self, **kwargs) -> FullScanOperation | FullPartitionScanOperation \
             | FullScanAggregatesOperation | None:
         match self.fullscan_params.mode:
             case "random":
                 scan_op_type = self.generator.choice(
-                    [FullScanOperation, FullPartitionScanOperation, FullScanAggregatesOperation])
+                    [FullScanOperation, FullPartitionScanOperation, FullScanAggregatesOperation]
+                )
                 return scan_op_type(self.generator, **kwargs)
             case "select":
                 return FullScanOperation(self.generator, **kwargs)
@@ -127,11 +156,12 @@ class ScanOperationThread:
             self.log.debug("Fullscan operations queue depleted.")
 
         except Exception as exc:  # pylint: disable=broad-except
-            self.log.warning("Encountered exception while performing a fullscan operation:\n%s", exc.with_traceback())
+            self.log.warning("Encountered exception while performing a fullscan operation:\n%s", exc)
 
     def run(self):
         end_time = time.time() + self.fullscan_params.duration
         self.wait_until_user_table_exists()
+
         while time.time() < end_time and not self.fullscan_params.db_cluster.nemesis_termination_event.is_set():
             self.fullscan_stats.read_pages = random.choice([100, 1000, 0])
             self.run_next_scan_operation()
@@ -167,10 +197,13 @@ class ScanOperationThread:
         return queue
 
 
-class ScanOperation:
-    def __init__(self, generator, fullscan_params: FullScanParams, fullscan_stats: FullScanStats,
+class FullscanOperationBase:
+    def __init__(self, generator: random.Random, fullscan_params: FullScanParams, fullscan_stats: FullScanStats,
                  scan_event: Type[FullScanEvent] | Type[FullPartitionScanEvent]
                  | Type[FullPartitionScanReversedOrderEvent] | Type[FullScanAggregateEvent]):
+        """
+        Base class for performing fullscan operations.
+        """
         self.log = logging.getLogger(self.__class__.__name__)
         self.fullscan_params = fullscan_params
         self.fullscan_stats = fullscan_stats
@@ -183,15 +216,16 @@ class ScanOperation:
         return self.generator.choice(self.fullscan_params.db_cluster.nodes)
 
     @abstractmethod
-    def randomly_form_cql_statement(self):
+    def randomly_form_cql_statement(self) -> str:
         ...
 
-    def execute_query(self, session, cmd: str):
+    def execute_query(self, session, cmd: str) -> ResultSet:
         self.log.info('Will run command "%s"', cmd)
         return session.execute(SimpleStatement(
             cmd,
             fetch_size=self.fullscan_params.page_size,
-            consistency_level=ConsistencyLevel.ONE), verbose=False)
+            consistency_level=ConsistencyLevel.ONE)
+        )
 
     def run_scan_event(self, cmd: str,
                        scan_event: Type[FullScanEvent | FullPartitionScanEvent
@@ -215,11 +249,11 @@ class ScanOperation:
                     user=self.fullscan_params.fullscan_user,
                     password=self.fullscan_params.fullscan_user_password) as session:
                 if self.termination_event.is_set():
-                    op_stat.exceptions.append(FullscanException("Aborted fullcan operation due to test "
+                    op_stat.exceptions.append(FullscanException("Aborted running a fullcan operation due to test "
                                                                 "termination event."))
                     op_stat.success = False
                     op_stat.nemesis_at_end = self.db_node.running_nemesis
-                    self.update_stats(op_stat)
+                    return op_stat
 
                 try:
                     start_time = time.time()
@@ -250,23 +284,8 @@ class ScanOperation:
     def update_stats(self, new_stat):
         self.fullscan_stats.stats.append(new_stat)
 
-    def run_scan_operation(self, cmd: str = None):
-        self.log.info("Running fullscan operation: %s", self.__class__.__name__)
-        self.run_scan_event(cmd=cmd or self.randomly_form_cql_statement(), scan_event=self.scan_event)
-
-    @staticmethod
-    def randomly_bypass_cache(cmd: str) -> str:
-        if random.choice([True] + [False]):
-            cmd += ' BYPASS CACHE'
-        return cmd
-
-    @staticmethod
-    def randomly_add_timeout(cmd) -> str:
-        if random.choice([True] * 2 + [False]):
-            cql_timeout_seconds = str(random.choice([2, 4, 8, 30, 120, 300]))
-            cql_timeout_param = f" USING TIMEOUT {cql_timeout_seconds}s"
-            cmd += cql_timeout_param
-        return cmd
+    def run_scan_operation(self, cmd: str = None) -> FullScanOperationStat:
+        return self.run_scan_event(cmd=cmd or self.randomly_form_cql_statement(), scan_event=self.scan_event)
 
     def fetch_result_pages(self, result, read_pages):
         self.log.debug('Will fetch up to %s result pages.."', read_pages)
@@ -277,21 +296,21 @@ class ScanOperation:
                 pages += 1
 
 
-class FullScanOperation(ScanOperation):
+class FullScanOperation(FullscanOperationBase):
     def __init__(self, generator, **kwargs):
         super().__init__(generator, scan_event=FullScanEvent, **kwargs)
 
-    def randomly_form_cql_statement(self) -> Optional[str]:
+    def randomly_form_cql_statement(self) -> str:
         base_query = FullScanAggregateCommands.SELECT_ALL.base_query
         timeout = self.generator.choice(TIMEOUT_VALUES)
         bypass_cache = self.generator.choice(BYPASS_CACHE_VALUES)
         cmd = base_query.substitute(ks_cf=self.fullscan_params.ks_cf,
-                                    timeout=f" {timeout}s",
+                                    timeout=f" USING TIMEOUT {timeout}s" if timeout else "",
                                     bypass_cache=bypass_cache)
         return cmd
 
 
-class FullPartitionScanOperation(ScanOperation):
+class FullPartitionScanOperation(FullscanOperationBase):
     """
     Run a full scan of a partition, assuming it has a clustering key and multiple rows.
     It runs a reversed query of a partition, then optionally runs a normal partition scan in order
@@ -310,7 +329,6 @@ class FullPartitionScanOperation(ScanOperation):
 
     def __init__(self, generator, **kwargs):
         super().__init__(generator, scan_event=FullPartitionScanReversedOrderEvent, **kwargs)
-        self.validate_data = self.fullscan_params.validate_data
         self.table_clustering_order = ""
         self.reversed_order = 'desc' if self.table_clustering_order.lower() == 'asc' else 'asc'
         self.reversed_query_filter_ck_stats = {'lt': {'count': 0, 'total_scan_duration': 0},
@@ -363,13 +381,10 @@ class FullPartitionScanOperation(ScanOperation):
                 # select * from scylla_bench.test where pk = 1234 and ck < 4721 and ck > 2549 order by ck desc
                 # limit 3467 bypass cache
                 selected_columns = [self.fullscan_params.pk_name, self.fullscan_params.ck_name]
-                self.log.info("include_data_column at the column selection part: %s full params: %s",
-                              self.fullscan_params.include_data_column, self.fullscan_params)
                 if self.fullscan_params.include_data_column:
                     selected_columns.append(self.fullscan_params.data_column_name)
                 reversed_query = f'select {",".join(selected_columns)} from {self.fullscan_params.ks_cf}' + \
                     f' where {self.fullscan_params.pk_name} = {partition_key}'
-                query_suffix = self.limit = ''
 
                 # Randomly add CK filtering ( less-than / greater-than / both / non-filter )
 
@@ -409,11 +424,15 @@ class FullPartitionScanOperation(ScanOperation):
                         )
 
                 query_suffix = self.generator.choice(BYPASS_CACHE_VALUES)
-                normal_query = reversed_query + query_suffix
-                if self.generator.choice([False] + [True]):  # Randomly add a LIMIT
+                reversed_query_suffix = query_suffix
+
+                if self.generator.choice([False, True]):  # Randomly add a LIMIT
                     self.limit = self.generator.randint(a=1, b=self.fullscan_params.rows_count)
-                    query_suffix = f' limit {self.limit}' + query_suffix
-                reversed_query += f' order by {self.fullscan_params.ck_name} {self.reversed_order}' + query_suffix
+                    reversed_query_suffix = f' limit {self.limit}' + query_suffix
+
+                normal_query = reversed_query + query_suffix
+                reversed_query += f' order by {self.fullscan_params.ck_name} {self.reversed_order}' + \
+                                  reversed_query_suffix
                 self.log.debug('Randomly formed normal query is: %s', normal_query)
                 self.log.debug('[scan: %s, type: %s] Randomly formed reversed query is: %s',
                                self.fullscan_stats.scans_counter,
@@ -429,6 +448,7 @@ class FullPartitionScanOperation(ScanOperation):
         self.fullscan_stats.number_of_rows_read = 0
         handler = PagedResultHandler(future=result, scan_operation=self)
         handler.finished_event.wait()
+
         if handler.error:
             self.log.warning("Got a Page Handler error: %s", handler.error)
             raise handler.error
@@ -455,8 +475,10 @@ class FullPartitionScanOperation(ScanOperation):
 
         with tempfile.NamedTemporaryFile(mode='w+', delete=True, encoding='utf-8') as reorder_normal_query_output:
             cmd = f'tac {self.normal_query_output.name}'
+
             if self.limit:
                 cmd += f' | head -n {self.limit}'
+
             cmd += f' > {reorder_normal_query_output.name}'
             LOCAL_CMD_RUNNER.run(cmd=cmd, ignore_status=True)
             reorder_normal_query_output.flush()
@@ -482,7 +504,8 @@ class FullPartitionScanOperation(ScanOperation):
                         stdout = result.stdout.strip()
                         self.log.info("%s command output is: \n%s", cmd, stdout)
         else:
-            self.log.warning("Comparison stderr:\n%s", result.stderr)
+            self.log.warning("Comparison of output of normal and reversed queries failed with stderr:\n%s",
+                             result.stderr)
 
         self.reset_output_files()
         return result
@@ -523,11 +546,11 @@ class FullPartitionScanOperation(ScanOperation):
                 full_partition_op_stat.success = False
 
 
-class FullScanAggregatesOperation(ScanOperation):
+class FullScanAggregatesOperation(FullscanOperationBase):
     def __init__(self, generator, **kwargs):
         super().__init__(generator, scan_event=FullScanAggregateEvent, **kwargs)
 
-    def randomly_form_cql_statement(self) -> Optional[str]:
+    def randomly_form_cql_statement(self) -> str:
         timeout = self.generator.choice(TIMEOUT_VALUES)
         bypass_cache = self.generator.choice(BYPASS_CACHE_VALUES)
         cmd = FullScanAggregateCommands.AGG_COUNT_ALL.base_query.substitute(
@@ -538,18 +561,19 @@ class FullScanAggregatesOperation(ScanOperation):
         return cmd
 
     def execute_query(self, session, cmd: str) -> ResultSet:
-        cmd_result: ResultSet = session.execute(query=cmd, trace=True, verbose=False)
+        cmd_result = session.execute(query=cmd, trace=True)
+
         if self._validate_fullscan_result(cmd_result):
             self.scan_event.message = f"{type(self).__name__} operation ended successfully"
         else:
             self.scan_event.severity = Severity.WARNING
             self.scan_event.message = f"{type(self).__name__} operation failed."
+
         return cmd_result
 
     def _validate_fullscan_result(self, cmd_result: ResultSet):
         regex_found = False
         dispatch_forward_statement_regex_pattern = re.compile(r"Dispatching forward_request to \d* endpoints")
-
         result = cmd_result.all()
 
         if not result:
@@ -587,7 +611,6 @@ class PagedResultHandler:
 
     def handle_page(self, rows):
         include_data_column = self.scan_operation.fullscan_params.include_data_column
-        self.log.info("Processing number of rows %s for scan_event %s", len(rows), self.scan_operation.scan_event)
         if self.scan_operation.scan_event == FullPartitionScanEvent:
             for row in rows:
                 self.scan_operation.normal_query_output.write(
@@ -610,13 +633,3 @@ class PagedResultHandler:
     def handle_error(self, exc):
         self.error = exc
         self.finished_event.set()
-
-
-class FullScanCommand(NamedTuple):
-    name: str
-    base_query: Template
-
-
-class FullScanAggregateCommands(NamedTuple):
-    SELECT_ALL = FullScanCommand("SELECT_ALL", Template("SELECT * from $ks_cf$timeout$bypass_cache"))
-    AGG_COUNT_ALL = FullScanCommand("AGG_COUNT_ALL", Template("SELECT count(*) FROM $ks_cf$timeout$bypass_cache"))

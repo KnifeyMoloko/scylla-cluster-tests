@@ -385,7 +385,7 @@ class FullPartitionScanOperation(FullscanOperationBase):
                     selected_columns.append(self.fullscan_params.data_column_name)
                 reversed_query = f'select {",".join(selected_columns)} from {self.fullscan_params.ks_cf}' + \
                     f' where {self.fullscan_params.pk_name} = {partition_key}'
-
+                query_suffix = self.limit = ''
                 # Randomly add CK filtering ( less-than / greater-than / both / non-filter )
 
                 # example: rows-count = 20, ck > 10, ck < 15, limit = 3 ==> ck_range = [11..14] = 4
@@ -423,19 +423,15 @@ class FullPartitionScanOperation(FullscanOperationBase):
                             ck_random_min_value
                         )
 
-                query_suffix = self.generator.choice(BYPASS_CACHE_VALUES)
-                reversed_query_suffix = query_suffix
-
-                if self.generator.choice([False, True]):  # Randomly add a LIMIT
-                    self.limit = self.generator.randint(a=1, b=self.fullscan_params.rows_count)
-                    reversed_query_suffix = f' limit {self.limit}' + query_suffix
-
+                # query_suffix = self.randomly_bypass_cache(cmd=query_suffix)
+                query_suffix = f"{query_suffix} {self.generator.choice(BYPASS_CACHE_VALUES)}"
                 normal_query = reversed_query + query_suffix
-                reversed_query += f' order by {self.fullscan_params.ck_name} {self.reversed_order}' + \
-                                  reversed_query_suffix
+                if random.choice([False] + [True]):  # Randomly add a LIMIT
+                    self.limit = random.randint(a=1, b=self.fullscan_params.rows_count)
+                    query_suffix = f' limit {self.limit}' + query_suffix
+                reversed_query += f' order by {self.fullscan_params.ck_name} {self.reversed_order}' + query_suffix
                 self.log.debug('Randomly formed normal query is: %s', normal_query)
-                self.log.debug('[scan: %s, type: %s] Randomly formed reversed query is: %s',
-                               self.fullscan_stats.scans_counter,
+                self.log.debug('[scan: %s, type: %s] Randomly formed reversed query is: %s', self.fullscan_stats.scans_counter,
                                ck_filter, reversed_query)
             else:
                 self.log.debug('No partition keys found for table: %s! A reversed query cannot be executed!',

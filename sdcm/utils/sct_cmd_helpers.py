@@ -13,6 +13,7 @@
 
 import os
 import logging
+import sys
 from typing import Optional
 
 import click
@@ -66,8 +67,10 @@ def add_file_logger(level: int = logging.DEBUG) -> None:
     cmd_path = "-".join(click.get_current_context().command_path.split()[1:])
     logdir = get_test_config().make_new_logdir(update_latest_symlink=False, postfix=f"-{cmd_path}")
     handler = logging.FileHandler(os.path.join(logdir, "hydra.log"))
+    stdout_handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(level)
 
     logger = getattr(__main__, 'LOGGER')
     if logger:
         logger.addHandler(handler)
+        logger.addHandler(stdout_handler)

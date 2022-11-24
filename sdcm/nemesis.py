@@ -73,7 +73,8 @@ from sdcm.sct_events.filters import DbEventsFilter, EventsSeverityChangerFilter
 from sdcm.sct_events.group_common_events import (ignore_alternator_client_errors, ignore_no_space_errors,
                                                  ignore_scrub_invalid_errors, ignore_view_error_gate_closed_exception,
                                                  ignore_stream_mutation_fragments_errors,
-                                                 ignore_ycsb_connection_refused, decorate_with_context)
+                                                 ignore_ycsb_connection_refused, decorate_with_context,
+                                                 ignore_reactor_stall_errors)
 from sdcm.sct_events.loaders import CassandraStressLogEvent
 from sdcm.sct_events.nemesis import DisruptionEvent
 from sdcm.sct_events.system import InfoEvent
@@ -3516,12 +3517,14 @@ class Nemesis:  # pylint: disable=too-many-instance-attributes,too-many-public-m
         else:
             raise UnsupportedNemesis(f"{self.target_node.distro} OS not supported!")
         self.log.info('Try to allocate 120% available memory, the allocated memory will be swaped out')
-        self.target_node.remoter.run(
-            "stress-ng --vm-bytes $(awk '/MemAvailable/{printf \"%d\\n\", $2 * 1.2;}' < /proc/meminfo)k --vm-keep -m 1 -t 100")
 
-        self.log.info('Try to allocate 90% total memory, the allocated memory will be swaped out')
-        self.target_node.remoter.run(
-            "stress-ng --vm-bytes $(awk '/MemTotal/{printf \"%d\\n\", $2 * 0.9;}' < /proc/meminfo)k --vm-keep -m 1 -t 100")
+        with ignore_reactor_stall_errors():
+            self.target_node.remoter.run(
+                "stress-ng --vm-bytes $(awk '/MemAvailable/{printf \"%d\\n\", $2 * 1.2;}' < /proc/meminfo)k --vm-keep -m 1 -t 100")
+
+            self.log.info('Try to allocate 90% total memory, the allocated memory will be swaped out')
+            self.target_node.remoter.run(
+                "stress-ng --vm-bytes $(awk '/MemTotal/{printf \"%d\\n\", $2 * 0.9;}' < /proc/meminfo)k --vm-keep -m 1 -t 100")
 
     def disrupt_toggle_cdc_feature_properties_on_table(self):
         """Manipulate cdc feature settings

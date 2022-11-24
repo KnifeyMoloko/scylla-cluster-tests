@@ -158,6 +158,17 @@ def ignore_mutation_write_errors():
 
 
 @contextmanager
+def ignore_reactor_stall_errors():
+    with ExitStack() as stack:
+        stack.enter_context(EventsSeverityChangerFilter(
+            new_severity=Severity.WARNING,
+            event_class=DatabaseLogEvent,
+            regex=r".*Reactor stalled for"
+        ))
+        yield
+
+
+@contextmanager
 def ignore_ycsb_connection_refused():
     with EventsFilter(event_class=YcsbStressEvent, regex='.*Unable to execute HTTP request: .*Connection refused'):
         yield

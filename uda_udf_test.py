@@ -82,16 +82,13 @@ class UDAUDFTest(ClusterTester):
             UDFVerification(name="xwasm_div",
                             query=f"SELECT {self.KEYSPACE_NAME}.xwasm_div(c2, c3) AS result "
                                   f"FROM {self.KEYSPACE_NAME}.{self.CF_NAME} LIMIT 1",
-                            verifier_func=lambda c2, c3, c7, query_response: c2 // c3 == query_response.result),
-            # UDFVerification(name="xwasm_fib",
-            #                 query=f"SELECT {self.KEYSPACE_NAME}.xwasm_fib(c2) AS result "
-            #                       f"FROM {self.KEYSPACE_NAME}.{self.CF_NAME} LIMIT 1",
-            #                 verifier_func=lambda c2, c3, c7, query_response: self._fib(c2) == query_response.result)
+                            verifier_func=lambda c2, c3, c7, query_response: c2 // c3 == query_response.result)
         ]
         self.log.info("Starting UDF verifications...")
 
         with self.db_cluster.cql_connection_patient(self.db_cluster.get_node(), verbose=False) as session:
             row_result = session.execute(row_query.query).one()
+            self.log.info("Row query was: %s", row_result)
             c2_value = row_result.c2
             c3_value = row_result.c3
             c7_value = row_result.c7
@@ -102,10 +99,6 @@ class UDAUDFTest(ClusterTester):
             for verification in verifications:
                 self.log.info("Running UDF verification: %s; query: %s", verification.name, verification.query)
                 query_result = session.execute(verification.query).one()
+                self.log.info("Verification query result: %s", query_result)
                 assert verification.verifier_func(c2_value, c3_value, c7_value, query_result)
             self.log.info("Finished running UDF verifications.")
-
-    def _fib(self, number: int) -> int:
-        if number < 2:
-            return number
-        return self._fib(number - 1) + self._fib(number - 2)

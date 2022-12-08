@@ -7,7 +7,7 @@ from sdcm.utils.udf import UDFS
 from sdcm.utils.uda import UDAS
 
 
-class UDFVerification(NamedTuple):
+class UDVerification(NamedTuple):
     name: str
     query: str
     verifier_func: Callable
@@ -39,6 +39,8 @@ class UDAUDFTest(ClusterTester):
             cmd = uda.get_create_query_string(ks="ks")
             node.run_cqlsh(cmd=cmd)
 
+        self._verify_uda_aggregates()
+
         write_thread, uda_udf_thread = self.run_stress_threads()
 
         # wait for stress to complete
@@ -67,22 +69,22 @@ class UDAUDFTest(ClusterTester):
         self.log.info("Database pre write completed")
 
     def _verify_udf_functions(self):
-        row_query = UDFVerification(name="row_query",
-                                    query=f"SELECT * FROM {self.KEYSPACE_NAME}.{self.CF_NAME} LIMIT 1",
-                                    verifier_func=lambda c2, c3, c7: all([c2, c3, c7]))
+        row_query = UDVerification(name="row_query",
+                                   query=f"SELECT * FROM {self.KEYSPACE_NAME}.{self.CF_NAME} LIMIT 1",
+                                   verifier_func=lambda c2, c3, c7: all([c2, c3, c7]))
         verifications = [
-            UDFVerification(name="lua_var_length_counter",
-                            query=f"SELECT {self.KEYSPACE_NAME}.lua_var_length_counter(c7) AS result "
-                                  f"FROM {self.KEYSPACE_NAME}.{self.CF_NAME} LIMIT 1",
-                            verifier_func=lambda c2, c3, c7, query_response: len(c7) == query_response.result),
-            UDFVerification(name="xwasm_plus",
-                            query=f"SELECT {self.KEYSPACE_NAME}.xwasm_plus(c2, c3) AS result "
-                                  f"FROM {self.KEYSPACE_NAME}.{self.CF_NAME} LIMIT 1",
-                            verifier_func=lambda c2, c3, c7, query_response: c2 + c3 == query_response.result),
-            UDFVerification(name="xwasm_div",
-                            query=f"SELECT {self.KEYSPACE_NAME}.xwasm_div(c2, c3) AS result "
-                                  f"FROM {self.KEYSPACE_NAME}.{self.CF_NAME} LIMIT 1",
-                            verifier_func=lambda c2, c3, c7, query_response: c2 // c3 == query_response.result)
+            UDVerification(name="lua_var_length_counter",
+                           query=f"SELECT {self.KEYSPACE_NAME}.lua_var_length_counter(c7) AS result "
+                                 f"FROM {self.KEYSPACE_NAME}.{self.CF_NAME} LIMIT 1",
+                           verifier_func=lambda c2, c3, c7, query_response: len(c7) == query_response.result),
+            UDVerification(name="xwasm_plus",
+                           query=f"SELECT {self.KEYSPACE_NAME}.xwasm_plus(c2, c3) AS result "
+                                 f"FROM {self.KEYSPACE_NAME}.{self.CF_NAME} LIMIT 1",
+                           verifier_func=lambda c2, c3, c7, query_response: c2 + c3 == query_response.result),
+            UDVerification(name="xwasm_div",
+                           query=f"SELECT {self.KEYSPACE_NAME}.xwasm_div(c2, c3) AS result "
+                                 f"FROM {self.KEYSPACE_NAME}.{self.CF_NAME} LIMIT 1",
+                           verifier_func=lambda c2, c3, c7, query_response: c2 // c3 == query_response.result)
         ]
         self.log.info("Starting UDF verifications...")
 
@@ -102,3 +104,18 @@ class UDAUDFTest(ClusterTester):
                 self.log.info("Verification query result: %s", query_result)
                 assert verification.verifier_func(c2_value, c3_value, c7_value, query_result)
             self.log.info("Finished running UDF verifications.")
+
+    def _verify_uda_aggregates(self):
+        uda_verification = UDVerification(
+            name="my_avg",
+            query="SELECT ks.my_avg(c2) AS result FROM ks.uda_udf",
+            verifier_func=lambda verification_query_result, avg_response: verification_query_result == avg_response)
+
+        self.log.info("Running UDA verification: %s; query: %s...", uda_verification.name, uda_verification.query)
+        with self.db_cluster.cql_connection_patient(self.db_cluster.get_node(), verbose=False) as session:
+            avg_query = "SELECT AVG (c2) FROM ks.uda_udf"
+            avg_result = session.execute(avg_query).one()
+            verification_query_result = session.execute(uda_verification.query).one()
+
+        assert uda_verification.verifier_func(verification_query_result, avg_result)
+        self.log.info("Finished running UDA verifications.")

@@ -113,7 +113,7 @@ class UDAUDFTest(ClusterTester):
 
         self.log.info("Running UDA verification: %s; query: %s...", uda_verification.name, uda_verification.query)
         with self.db_cluster.cql_connection_patient(self.db_cluster.get_node(), verbose=False) as session:
-            avg_query = "SELECT AVG (c2) FROM ks.uda_udf"
+            avg_query = "SELECT AVG (c4) FROM ks.uda_udf"
             avg_result = session.execute(avg_query).one()
             verification_query_result = session.execute(uda_verification.query).one()
 

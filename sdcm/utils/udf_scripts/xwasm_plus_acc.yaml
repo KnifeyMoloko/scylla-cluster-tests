@@ -148,4 +148,4 @@ script: |-
   (export "memory" (memory 0))
   (export "xwasm_plus_acc" (func 0))
   (export "_scylla_abi" (global 0))
-  (data (;0;) (i32.const 1024) "\\01"))
+  (data (;0;) (i32.const 1024) "\01\00\00\00"))

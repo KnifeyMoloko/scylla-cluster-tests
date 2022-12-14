@@ -39,7 +39,7 @@ class UDAUDFTest(ClusterTester):
             cmd = uda.get_create_query_string(ks="ks")
             node.run_cqlsh(cmd=cmd)
 
-        # self._verify_uda_aggregates()
+        self._verify_uda_aggregates()
 
         write_thread, uda_udf_thread = self.run_stress_threads()
 

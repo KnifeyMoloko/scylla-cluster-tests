@@ -28,31 +28,23 @@ table_definition: |
 
 columnspec:
   - name: pk
-    size: uniform(1..1k)
     population: uniform(1..20M)
   - name: ck
     cluster: uniform(1..1k)
     population: uniform(1..20M)
   - name: c1
-    size: uniform(1..1k)
     population: uniform(1..1k)
   - name: c2
-    size: uniform(1..1k)
     population: uniform(1..1k)
   - name: c3
-    size: uniform(1..1k)
     population: uniform(1..1k)
   - name: c4
-    size: uniform(1..1k)
     population: uniform(1..1k)
   - name: c5
-    size: uniform(1..1k)
     population: uniform(1..1k)
   - name: c6
-    size: uniform(1..1k)
     population: uniform(1..1k)
   - name: c7
-    size: uniform(1..1k)
     population: uniform(1..1k)
 
 insert:

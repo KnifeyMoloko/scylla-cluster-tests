@@ -117,5 +117,6 @@ class UDAUDFTest(ClusterTester):
             avg_result = session.execute(avg_query).one()
             verification_query_result = session.execute(uda_verification.query).one()
 
-        assert uda_verification.verifier_func(verification_query_result, avg_result)
+        assert uda_verification.verifier_func(verification_query_result, avg_result), \
+            "UDA verifivation failed. UDA result: %s, Builtin AVG result: %s" % (verification_query_result, avg_result)
         self.log.info("Finished running UDA verifications.")

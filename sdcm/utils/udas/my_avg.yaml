@@ -5,5 +5,5 @@ args: "int"
 return_type: "float"
 accumulator_udf_name: "lua_plus_acc"
 reduce_udf_name: null
-final_udf_name: "xwasm_div_fin"
+final_udf_name: "lua_div_fin"
 initial_condition: "(0, 0)"

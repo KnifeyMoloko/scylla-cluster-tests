@@ -108,7 +108,7 @@ class UDAUDFTest(ClusterTester):
     def _verify_uda_aggregates(self):
         uda_verification = UDVerification(
             name="my_avg",
-            query="SELECT ks.my_avg(c2) AS result FROM ks.uda_udf",
+            query="SELECT ks.my_avg(c2) AS result FROM ks.uda_udf USING TIMEOUT 120s",
             verifier_func=lambda verification_query_result, avg_response: verification_query_result == avg_response)
 
         self.log.info("Running UDA verification: %s; query: %s...", uda_verification.name, uda_verification.query)

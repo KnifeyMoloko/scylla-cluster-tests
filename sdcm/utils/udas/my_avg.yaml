@@ -2,7 +2,7 @@
 
 name: "my_avg"
 args: "int"
-return_type: "float"
+return_type: "int"
 accumulator_udf_name: "lua_plus_acc"
 reduce_udf_name: null
 final_udf_name: "lua_div_fin"

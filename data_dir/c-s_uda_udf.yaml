@@ -54,7 +54,7 @@ insert:
 
 queries:
   my_avg:
-    cql: "SELECT ks.my_avg(c2) AS result FROM ks.uda_udf"
+    cql: "SELECT ks.my_avg(c4) AS result FROM ks.uda_udf"
     fields: samerow
   lua_var_length_counter:
     cql: "SELECT ks.lua_var_length_counter(c7) AS result FROM ks.uda_udf LIMIT 10"
@@ -65,6 +65,3 @@ queries:
   xwasm_div:
     cql: "SELECT ks.xwasm_div(c2, c3) AS result FROM ks.uda_udf LIMIT 10"
     fields: samerow
-#  xwasm_fib:
-#    cql: "SELECT ks.xwasm_fib(c2) AS result AS result FROM ks.uda_udf LIMIT 10"
-#    fields: samerow

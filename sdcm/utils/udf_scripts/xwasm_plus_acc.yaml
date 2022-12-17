@@ -33,4 +33,4 @@ script: |-
   (export "__heap_base" (global 5))
   (export "__memory_base" (global 6))
   (export "__table_base" (global 7))
-  (data $.data (i32.const 1024) "\\01\\00\\00\\00\\00\\00\\00\\00"))
+  (data $.data (i32.const 1024) "\01\00\00\00"))

@@ -103,12 +103,12 @@ class UDAUDFTest(ClusterTester):
     def _verify_uda_aggregates(self):
         uda_verification = UDVerification(
             name="my_avg",
-            query="SELECT ks.my_avg(c2) AS result FROM ks.uda_udf USING TIMEOUT 120s",
+            query="SELECT ks.my_avg(c4) AS result FROM ks.uda_udf USING TIMEOUT 120s",
             verifier_func=lambda verification_query_result, avg_response: verification_query_result == avg_response)
 
         self.log.info("Running UDA verification: %s; query: %s...", uda_verification.name, uda_verification.query)
         with self.db_cluster.cql_connection_patient(self.db_cluster.get_node(), verbose=False) as session:
-            avg_query = "SELECT AVG (c2) FROM ks.uda_udf"
+            avg_query = "SELECT AVG (c4) FROM ks.uda_udf"
             avg_result = session.execute(avg_query).one()
             verification_query_result = session.execute(uda_verification.query).one()
 

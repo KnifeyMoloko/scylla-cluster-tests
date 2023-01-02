@@ -12,5 +12,5 @@ append_scylla_yaml: |
   experimental_features:
      - udf
   enable_user_defined_functions: true
-  user_defined_function_time_limit_ms: 1000
+  user_defined_function_time_limit_ms: 100000000
   user_defined_function_allocation_limit_bytes: 1048576

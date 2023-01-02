@@ -28,7 +28,7 @@ class UDAUDFTest(ClusterTester):
 
         for udf in UDFS.values():
             self.log.info("Creating the following UDF: %s", udf.name)
-            cmd = udf.get_create_query(ks="ks")
+            cmd = udf.get_create_query(ks=self.KEYSPACE_NAME)
             with self.db_cluster.cql_connection_patient(node=node) as session:
                 session.execute(cmd)
             self.log.info("UDF %s created", udf.name)
@@ -36,7 +36,7 @@ class UDAUDFTest(ClusterTester):
         self._verify_udf_functions()
 
         for uda in UDAS.values():
-            cmd = uda.get_create_query_string(ks="ks")
+            cmd = uda.get_create_query_string(ks=self.KEYSPACE_NAME)
             node.run_cqlsh(cmd=cmd)
 
         self._verify_uda_aggregates()

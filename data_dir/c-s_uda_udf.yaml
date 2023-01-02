@@ -21,7 +21,7 @@ table_definition: |
         c6 float,
         c7 text,
         PRIMARY KEY(pk, ck)
-  ) WITH compaction = { 'class':'SizeTieredCompactionStrategy' }
+  ) WITH compaction = { 'class':'LeveledCompactionStrategy' }
     AND comment='A test table for testing UDAs and UDFs'
 
 ### Column Distribution Specifications ###

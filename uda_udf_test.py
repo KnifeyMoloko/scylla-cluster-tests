@@ -109,8 +109,12 @@ class UDAUDFTest(ClusterTester):
         self.log.info("Running UDA verification: %s; query: %s...", uda_verification.name, uda_verification.query)
         with self.db_cluster.cql_connection_patient(self.db_cluster.get_node(), verbose=False) as session:
             avg_query = "SELECT AVG (c4) FROM ks.uda_udf USING TIMEOUT 600s"
-            avg_result = session.execute(avg_query).one()
+            self.log.info("Running builtin AVG function...")
+            avg_result = session.execute(avg_query, timeout=600.0).one()
+            self.log.info("Finished running builtin AVG function.")
+            self.log.info("Running custom my_avg function...")
             verification_query_result = session.execute(uda_verification.query, timeout=600.0).one()
+            self.log.info("Finished running custom my_avg function.")
 
         assert uda_verification.verifier_func(verification_query_result, avg_result), \
             "UDA verifivation failed. UDA result: %s, Builtin AVG result: %s" % (verification_query_result, avg_result)

@@ -1,9 +1,9 @@
 # UDA: creates a custom function calculating the average of int values
 
 name: "my_avg"
-args: "bigint"
-return_type: "bigint"
-accumulator_udf_name: "xwasm_plus_acc"
+args: "int"
+return_type: "int"
+accumulator_udf_name: "xwasm_plus_acc_int"
 reduce_udf_name: null
 final_udf_name: "lua_div_fin"
 initial_condition: "(0, 0)"

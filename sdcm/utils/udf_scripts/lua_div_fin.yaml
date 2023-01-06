@@ -1,8 +1,8 @@
 # UDF script: divides two integers
 
 name: 'lua_div_fin'
-args: '(acc tuple<bigint, bigint>)'
+args: '(acc tuple<int, int>)'
 called_on_null_input_returns: 'NULL'
-return_type: 'bigint'
+return_type: 'int'
 language: 'lua'
 script: 'return acc[2] // acc[1]'

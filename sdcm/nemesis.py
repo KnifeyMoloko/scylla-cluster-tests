@@ -181,6 +181,7 @@ class Nemesis:  # pylint: disable=too-many-instance-attributes,too-many-public-m
     limited: bool = False           # flag that signal that nemesis are belong to limited set of nemesises
     has_steady_run: bool = False    # flag that signal that nemesis should be run with perf tests with steady run
     free_tier_set: bool = False     # nemesis should be run in FreeTierNemesisSet
+    my_own: bool = False
 
     def __init__(self, tester_obj, termination_event, *args):  # pylint: disable=unused-argument
         for name, member in inspect.getmembers(self, lambda x: inspect.isfunction(x) or inspect.ismethod(x)):
@@ -396,6 +397,7 @@ class Nemesis:  # pylint: disable=too-many-instance-attributes,too-many-public-m
             limited: Optional[bool] = None,
             topology_changes: Optional[bool] = None,
             free_tier_set: Optional[bool] = None,
+            my_own: Optional[bool] = None
     ) -> List[str]:
         return self.get_list_of_methods_by_flags(
             disruptive=disruptive,
@@ -405,6 +407,7 @@ class Nemesis:  # pylint: disable=too-many-instance-attributes,too-many-public-m
             limited=limited,
             topology_changes=topology_changes,
             free_tier_set=free_tier_set,
+            my_own=my_own
         )
 
     def _is_it_on_kubernetes(self) -> bool:
@@ -420,6 +423,7 @@ class Nemesis:  # pylint: disable=too-many-instance-attributes,too-many-public-m
             limited: Optional[bool] = None,
             topology_changes: Optional[bool] = None,
             free_tier_set: Optional[bool] = None,
+            my_own: Optional[bool] = None
     ) -> List[str]:
         subclasses_list = self._get_subclasses(
             disruptive=disruptive,
@@ -429,6 +433,7 @@ class Nemesis:  # pylint: disable=too-many-instance-attributes,too-many-public-m
             limited=limited,
             topology_changes=topology_changes,
             free_tier_set=free_tier_set,
+            my_own=my_own
         )
         disrupt_methods_list = []
         for subclass in subclasses_list:
@@ -4076,6 +4081,7 @@ class MajorCompactionMonkey(Nemesis):
     disruptive = False
     kubernetes = True
     limited = True
+    my_own = True
 
     def disrupt(self):
         self.disrupt_major_compaction()
@@ -4864,7 +4870,7 @@ class CDCStressorMonkey(Nemesis):
 
 
 class DecommissionStreamingErrMonkey(Nemesis):
-
+    my_own = True
     disruptive = True
     topology_changes = True
 
@@ -4873,7 +4879,7 @@ class DecommissionStreamingErrMonkey(Nemesis):
 
 
 class RebuildStreamingErrMonkey(Nemesis):
-
+    my_own = True
     disruptive = True
 
     def disrupt(self):
@@ -4881,7 +4887,7 @@ class RebuildStreamingErrMonkey(Nemesis):
 
 
 class RepairStreamingErrMonkey(Nemesis):
-
+    my_own = True
     disruptive = True
 
     def disrupt(self):
@@ -4924,6 +4930,7 @@ class ResetLocalSchemaMonkey(Nemesis):
 
 class StartStopMajorCompaction(Nemesis):
     disruptive = False
+    my_own = True
 
     def disrupt(self):
         self.disrupt_start_stop_major_compaction()
@@ -4938,6 +4945,7 @@ class StartStopScrubCompaction(Nemesis):
 
 class StartStopCleanupCompaction(Nemesis):
     disruptive = False
+    my_own = True
 
     def disrupt(self):
         self.disrupt_start_stop_cleanup_compaction()
@@ -4945,6 +4953,7 @@ class StartStopCleanupCompaction(Nemesis):
 
 class StartStopValidationCompaction(Nemesis):
     disruptive = False
+    my_own = True
 
     def disrupt(self):
         self.disrupt_start_stop_validation_compaction()

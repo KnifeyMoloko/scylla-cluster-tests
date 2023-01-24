@@ -12,10 +12,12 @@
 # Copyright (c) 2022 ScyllaDB
 from __future__ import annotations
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Any
 
 import yaml
 from pydantic import BaseModel
+
+from sdcm.remote import LocalCmdRunner
 
 
 class UDF(BaseModel):
@@ -46,7 +48,12 @@ class UDF(BaseModel):
     called_on_null_input_returns: str
     return_type: str
     language: Literal["lua", "xwasm"]
-    script: str
+    script_name: str
+    script: str = ""
+
+    def __init__(self, **data: Any):
+        super().__init__(**data)
+        self._compile_script_from_c_code()
 
     def get_create_query(self, ks: str, create_or_replace: bool = True) -> str:
         create_part = "CREATE OR REPLACE FUNCTION" if create_or_replace else "CREATE FUNCTION"
@@ -61,6 +68,33 @@ class UDF(BaseModel):
         with Path(udf_yaml_filename).open(mode="r", encoding="utf-8") as udf_yaml:
             return cls(**yaml.safe_load(udf_yaml))
 
+    def _compile_script_from_c_code(self):
+        source_code_path = Path("sdcm/utils/udf_scripts") / self.script_name
+        wasm_output_path = source_code_path.parent / self.script_name.replace(".c", ".wasm")
+        wat_output_path = source_code_path.parent / self.script_name.replace(".c", ".wat")
+        compilation_cmd = f"clang -O2 --target=wasm32 --no-standard-libraries -Wl,--export-all -Wl,--no-entry " \
+                          f"{source_code_path}" \
+                          f" -o {wasm_output_path}"
+        wasm2wat_cmd = f"sdcm/utils/udf_scripts/wabt/bin/wasm2wat " \
+                       f"{wasm_output_path.absolute()} > {wat_output_path.absolute()}"
+        expected_wasm2_wat_binary_path = Path("sdcm/utils/udf_scripts/wabt/build/wasm2wat")
+
+        assert source_code_path.is_file(), "Could not find the source code file for the script under path: " \
+                                           "%s" % source_code_path.absolute()
+
+        local_cmd_runner = LocalCmdRunner()
+        local_cmd_runner.run(cmd=compilation_cmd)
+
+        assert expected_wasm2_wat_binary_path.is_file(), "No wasm2wat file found in path: " \
+                                                         "%s" % expected_wasm2_wat_binary_path.absolute()
+
+        local_cmd_runner.run(wasm2wat_cmd)
+
+        assert wat_output_path.is_file(), "Could not find output .wat file in path: %s" % wat_output_path.absolute()
+
+        self.script = wat_output_path.read_text(encoding="utf-8")
+        print(f"Script in the wat output path:\n{self.script}")
+
 
 def _load_all_udfs() -> dict[str, UDF]:
     """Convenience functions for loading all the existing UDF scripts from /sdcm/utils/udf_scripts"""
@@ -70,6 +104,29 @@ def _load_all_udfs() -> dict[str, UDF]:
         udf = UDF.from_yaml(str(script))
         udfs.update({script.stem: udf})
     return udfs
+
+
+def _clone_and_install_wabt() -> None:
+    expected_wasm2wat_binary_path = Path("sdcm/utils/udf_scripts/wabt/bin/wasm2wat")
+
+    if expected_wasm2wat_binary_path.is_file():
+        return
+
+    local_cmd_runner = LocalCmdRunner()
+    git_clone_cmd = "cd sdcm/utils/udf_scripts && " \
+                    "git clone --recursive https://github.com/WebAssembly/wabt " \
+                    "&& cd wabt " \
+                    "&& git submodule update --init"
+    libuv_apt_install_command = "sudo apt-get install libuv1"
+    cmake_cmd = "cd sdcm/utils/udf_scripts/wabt && " \
+                "mkdir build && " \
+                "cd build && " \
+                "cmake .. && " \
+                "cmake --build ."
+
+    local_cmd_runner.run(git_clone_cmd)
+    local_cmd_runner.run(libuv_apt_install_command)
+    local_cmd_runner.run(cmake_cmd)
 
 
 UDFS = _load_all_udfs()

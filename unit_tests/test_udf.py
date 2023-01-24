@@ -10,14 +10,17 @@
 # See LICENSE for more details.
 #
 # Copyright (c) 2022 ScyllaDB
+from pathlib import Path
 from unittest import TestCase
 
 from pydantic import ValidationError
 
-from sdcm.utils.udf import UDF, UDFS
+from sdcm.remote import LocalCmdRunner
+from sdcm.utils.udf import UDF, _clone_and_install_wabt, UDFS
 
 
 class TestUDF(TestCase):
+    WABT_PARENT_PATH = Path("sdcm/utils/udf_scripts/wabt")
     MOCK_LUA_UDF_VALS = {
         "name": "lua_var_length_counter",
         "args": "(var text)",
@@ -135,3 +138,49 @@ class TestUDF(TestCase):
             self.assertTrue(udf.return_type)
             self.assertTrue(udf.language)
             self.assertTrue(udf.script)
+
+    def test_compile_udf_from_c_source(self):
+        expected_wat_output = """(module
+  (type (;0;) (func))
+  (type (;1;) (func (param i32) (result i32)))
+  (func $__wasm_call_ctors (type 0))
+  (func $simple_return (type 1) (param i32) (result i32)
+    local.get 0)
+  (memory (;0;) 2)
+  (global $__stack_pointer (mut i32) (i32.const 66560))
+  (global (;1;) i32 (i32.const 1024))
+  (global (;2;) i32 (i32.const 1024))
+  (global (;3;) i32 (i32.const 1024))
+  (global (;4;) i32 (i32.const 66560))
+  (global (;5;) i32 (i32.const 0))
+  (global (;6;) i32 (i32.const 1))
+  (export "memory" (memory 0))
+  (export "__wasm_call_ctors" (func $__wasm_call_ctors))
+  (export "simple_return" (func $simple_return))
+  (export "__dso_handle" (global 1))
+  (export "__data_end" (global 2))
+  (export "__global_base" (global 3))
+  (export "__heap_base" (global 4))
+  (export "__memory_base" (global 5))
+  (export "__table_base" (global 6)))
+"""
+        local_cmd_runner = LocalCmdRunner()
+        _clone_and_install_wabt()
+        yaml_file_path = "./sdcm/utils/udf_scripts/xwasm_simple_return_int.yaml"
+        udf = UDF.from_yaml(yaml_file_path)
+
+        self.assertIsNotNone(udf)
+        self.assertTrue(udf.name)
+        self.assertEqual(expected_wat_output, udf.script)
+
+        # clean up
+        local_cmd_runner.run(f"rm -rf {self.WABT_PARENT_PATH.absolute()}", ignore_status=True)
+
+    def test_clone_and_install_wabt(self):
+        local_cmd_runner = LocalCmdRunner()
+        _clone_and_install_wabt()
+        expected_wasm2wat_binary_path = Path("sdcm/utils/udf_scripts/wabt/bin/wasm2wat")
+        self.assertTrue(expected_wasm2wat_binary_path.is_file())
+
+        # clean up
+        local_cmd_runner.run(f"rm -rf {self.WABT_PARENT_PATH.absolute()}", ignore_status=True)

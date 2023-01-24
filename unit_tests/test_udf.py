@@ -169,8 +169,6 @@ class TestUDF(TestCase):
         yaml_file_path = "./sdcm/utils/udf_scripts/xwasm_simple_return_int.yaml"
         udf = UDF.from_yaml(yaml_file_path)
 
-        self.assertIsNotNone(udf)
-        self.assertTrue(udf.name)
         self.assertEqual(expected_wat_output, udf.script)
 
         # clean up

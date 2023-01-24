@@ -6,4 +6,4 @@ args: '(acc tuple<int, int>)'
 called_on_null_input_returns: 'NULL'
 return_type: 'int'
 language: 'xwasm'
-script_name: "simple_return.c"
+script_name: 'simple_return.c'
